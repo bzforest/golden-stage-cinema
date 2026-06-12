@@ -12,3 +12,6 @@ dist/
 
 # Code Walkthrough
 golden-stage-cinema-server/code_walkthrough.md
+
+# Firebase Service Account
+firebase-service-account.json

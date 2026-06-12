@@ -26,6 +26,9 @@ func main() {
 		log.Println("Warning: Error loading .env file from ../.env")
 	}
 
+	// ตั้งค่า Firebase Auth
+	config.InitFirebase()
+
 	// เชื่อมต่อ MongoDB
 	config.ConnectDB()
 
