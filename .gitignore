@@ -1,0 +1,11 @@
+# Environments
+.env
+
+# Go
+/golden-stage-cinema-server/tmp/
+/golden-stage-cinema-server/bin/
+
+# Node / Vue
+node_modules/
+dist/
+.DS_Store
