@@ -1,4 +1,4 @@
-package models
+package movies
 
 // Movie คือ Struct ที่จับคู่กับ Document ใน Collection 'movies'
 type Movie struct {
