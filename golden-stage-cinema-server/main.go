@@ -6,7 +6,8 @@ import (
 	"os"
 
 	"golden-stage-cinema-server/config"
-	"golden-stage-cinema-server/routes"
+	"golden-stage-cinema-server/features/bookings"
+	"golden-stage-cinema-server/features/movies"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -22,6 +23,9 @@ func main() {
 	// เชื่อมต่อ MongoDB
 	config.ConnectDB()
 
+	// เชื่อมต่อ Redis
+	config.ConnectRedis()
+
 	// ดึงค่า PORT จาก Environment Variable ถ้าไม่มีให้ใช้ค่าเริ่มต้นเป็น 8080
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -32,7 +36,8 @@ func main() {
 	r := gin.Default()
 
 	// ติดตั้ง Routes ระบบต่างๆ
-	routes.MovieRoutes(r)
+	movies.MovieRoutes(r)
+	bookings.BookingRoutes(r)
 
 	// สร้าง Group สำหรับ API route
 	api := r.Group("/api")
