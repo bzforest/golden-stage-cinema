@@ -91,3 +91,29 @@
 
 **Real-time Communication**
 * `WS /ws/seats/:showtime_id` : WebSocket สำหรับรับข้อมูลอัปเดตสถานะที่นั่งแบบ Real-time
+
+---
+
+### วิธีการทดสอบ API ด้วย Postman
+
+เนื่องจากเราปรับสถาปัตยกรรมไปใช้ `ObjectID` ของ MongoDB เป็น Best Practice แล้ว การทดสอบผ่าน Postman จะต้องทำตามขั้นตอนดังนี้:
+
+**1. หา ObjectID จากฐานข้อมูลจริง**
+เปิดโปรแกรม **MongoDB Compass** เข้าไปที่ฐานข้อมูล `golden_stage_db` 
+- เข้าไปที่ Collection `movies` ก๊อปปี้ค่า `_id` ของเรื่องที่ต้องการ (รหัส 24 ตัวอักษร เช่น `6a2be2...`) นำไปวางแทน `:movie_id`
+- นำไปใช้เรียก `GET /api/movies/:movie_id/showtimes` เพื่อดูรอบฉายทั้งหมด
+- จากผลลัพธ์รอบฉาย ให้ก๊อปปี้ค่า `id` ของรอบฉาย นำไปวางแทน `:showtime_id`
+- นำไปใช้เรียก `GET /api/showtimes/:showtime_id/seats` เพื่อดูผังที่นั่ง
+
+**2. การยิง API ที่ถูกล็อก (Secured Endpoints)**
+สำหรับ API `/api/bookings/lock` และ `/api/bookings/confirm` ต้องใช้สิทธิ์ผู้ใช้:
+- ใน Postman ให้ไปที่แท็บ **Authorization**
+- เลือก Type เป็น **Bearer Token**
+- นำ Firebase Token (ที่ได้จากการจำลองล็อกอิน) มาใส่ในช่อง Token
+- ในแท็บ **Body** เลือก raw และเป็น `JSON` ตัวอย่างเช่น:
+```json
+{
+  "showtime_id": "นำ _id ของรอบฉายมาใส่ตรงนี้",
+  "seat_number": "A1"
+}
+```

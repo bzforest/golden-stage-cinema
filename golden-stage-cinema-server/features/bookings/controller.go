@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type LockSeatRequest struct {
@@ -72,17 +73,23 @@ func ConfirmBooking(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	showtimeID, err := primitive.ObjectIDFromHex(req.ShowtimeID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid showtime_id format"})
+		return
+	}
+
 	// 1. บันทึกข้อมูลการจองลง MongoDB
 	collection := config.GetCollection("bookings")
 	booking := Booking{
-		ShowtimeID: req.ShowtimeID,
+		ShowtimeID: showtimeID,
 		SeatNumber: req.SeatNumber,
 		UserID:     userID,
 		Status:     "CONFIRMED",
 		CreatedAt:  time.Now(),
 	}
 
-	_, err := collection.InsertOne(ctx, booking)
+	_, err = collection.InsertOne(ctx, booking)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save booking to database"})
 		return
