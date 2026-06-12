@@ -14,6 +14,7 @@ import (
 	"golden-stage-cinema-server/features/bookings"
 	"golden-stage-cinema-server/features/movies"
 	"golden-stage-cinema-server/features/realtime"
+	"golden-stage-cinema-server/features/showtimes"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -51,6 +52,7 @@ func main() {
 	movies.MovieRoutes(r)
 	bookings.BookingRoutes(r)
 	realtime.RealtimeRoutes(r)
+	showtimes.ShowtimeRoutes(r)
 
 	// สร้าง Group สำหรับ API route
 	api := r.Group("/api")
