@@ -13,11 +13,10 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// LockSeatRequest กำหนดรูปแบบของ JSON ที่ส่งมา
 type LockSeatRequest struct {
 	ShowtimeID string `json:"showtime_id" binding:"required"`
 	SeatNumber string `json:"seat_number" binding:"required"`
-	UserID     string `json:"user_id" binding:"required"`
+	// เอา UserID ออกจาก JSON Request ป้องกันคนส่งมาปลอมแปลง
 }
 
 // LockSeat ฟังก์ชันสำหรับจองและล็อกที่นั่ง
@@ -30,14 +29,17 @@ func LockSeat(c *gin.Context) {
 		return
 	}
 
+	// ดึงไอดีผู้ใช้ตัวจริงจาก Middleware
+	userID := c.MustGet("user_id").(string)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// สร้าง Redis Key
 	key := fmt.Sprintf("lock:seat:%s:%s", req.ShowtimeID, req.SeatNumber)
 
-	// ใช้ SETNX (Set if Not eXists) เพื่อล็อกที่นั่งด้วย user_id ตั้งเวลา 5 นาที
-	success, err := config.RedisClient.SetNX(ctx, key, req.UserID, 5*time.Minute).Result()
+	// ใช้ SETNX (Set if Not eXists) เพื่อล็อกที่นั่งด้วย userID ตั้งเวลา 5 นาที
+	success, err := config.RedisClient.SetNX(ctx, key, userID, 5*time.Minute).Result()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process lock request"})
 		return
@@ -50,11 +52,9 @@ func LockSeat(c *gin.Context) {
 	}
 }
 
-// ConfirmBookingRequest (เหมือน LockSeatRequest แต่อาจมีข้อมูลเพิ่มเติมในอนาคต)
 type ConfirmBookingRequest struct {
 	ShowtimeID string `json:"showtime_id" binding:"required"`
 	SeatNumber string `json:"seat_number" binding:"required"`
-	UserID     string `json:"user_id" binding:"required"`
 }
 
 // ConfirmBooking ฟังก์ชันยืนยันการจอง บันทึกลง Mongo และส่ง Event เข้า RabbitMQ
@@ -66,6 +66,9 @@ func ConfirmBooking(c *gin.Context) {
 		return
 	}
 
+	// ดึงไอดีผู้ใช้ตัวจริงจาก Middleware
+	userID := c.MustGet("user_id").(string)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -74,7 +77,7 @@ func ConfirmBooking(c *gin.Context) {
 	booking := Booking{
 		ShowtimeID: req.ShowtimeID,
 		SeatNumber: req.SeatNumber,
-		UserID:     req.UserID,
+		UserID:     userID,
 		Status:     "CONFIRMED",
 		CreatedAt:  time.Now(),
 	}
