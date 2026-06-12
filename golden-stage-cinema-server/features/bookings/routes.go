@@ -13,5 +13,6 @@ func BookingRoutes(router *gin.Engine) {
 	{
 		bookingGroup.POST("/lock", LockSeat)
 		bookingGroup.POST("/confirm", ConfirmBooking)
+		bookingGroup.GET("/me", GetUserBookings)
 	}
 }

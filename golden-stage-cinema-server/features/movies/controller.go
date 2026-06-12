@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // GetMovies รับ Request เพื่อดึงข้อมูลหนังทั้งหมดจาก MongoDB
@@ -42,4 +44,37 @@ func GetMovies(c *gin.Context) {
 
 	// ส่งข้อมูลกลับไปเป็น JSON
 	c.JSON(http.StatusOK, moviesList)
+}
+
+// GetMovieByID ดึงข้อมูลหนัง 1 เรื่องด้วย ObjectID
+func GetMovieByID(c *gin.Context) {
+	movieIDStr := c.Param("movie_id")
+	if movieIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "movie_id is required"})
+		return
+	}
+
+	movieID, err := primitive.ObjectIDFromHex(movieIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid movie_id format"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	collection := config.GetCollection("movies")
+	var movie Movie
+
+	err = collection.FindOne(ctx, bson.M{"_id": movieID}).Decode(&movie)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Movie not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch movie"})
+		return
+	}
+
+	c.JSON(http.StatusOK, movie)
 }

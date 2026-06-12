@@ -12,6 +12,7 @@ import (
 
 	"golden-stage-cinema-server/config"
 	"golden-stage-cinema-server/features/bookings"
+	"golden-stage-cinema-server/features/cinemas"
 	"golden-stage-cinema-server/features/movies"
 	"golden-stage-cinema-server/features/realtime"
 	"golden-stage-cinema-server/features/showtimes"
@@ -50,6 +51,7 @@ func main() {
 
 	// ติดตั้ง Routes ระบบต่างๆ
 	movies.MovieRoutes(r)
+	cinemas.CinemaRoutes(r)
 	bookings.BookingRoutes(r)
 	realtime.RealtimeRoutes(r)
 	showtimes.ShowtimeRoutes(r)

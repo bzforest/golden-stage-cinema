@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -133,4 +134,33 @@ func ConfirmBooking(c *gin.Context) {
 
 	// ตอบกลับ 200 OK
 	c.JSON(http.StatusOK, gin.H{"message": "Booking confirmed and message queued"})
+}
+
+// GetUserBookings ดึงประวัติการจองของผู้ใช้งาน
+func GetUserBookings(c *gin.Context) {
+	userID := c.MustGet("user_id").(string)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	collection := config.GetCollection("bookings")
+
+	cursor, err := collection.Find(ctx, bson.M{"user_id": userID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch bookings"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var bookings []Booking
+	if err = cursor.All(ctx, &bookings); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode bookings"})
+		return
+	}
+
+	if bookings == nil {
+		bookings = []Booking{}
+	}
+
+	c.JSON(http.StatusOK, bookings)
 }

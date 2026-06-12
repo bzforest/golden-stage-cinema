@@ -82,9 +82,13 @@
 
 **Public Endpoints (ไม่ต้อง Login)**
 * `GET /api/movies` : ดึงรายชื่อภาพยนตร์ทั้งหมดสำหรับหน้า Landing Page
+* `GET /api/movies/:movie_id` : ดึงรายละเอียดของภาพยนตร์ 1 เรื่อง
+* `GET /api/cinemas` : ดึงรายชื่อสาขาโรงภาพยนตร์ทั้งหมด (Master Data)
+* `GET /api/cinemas/:cinema_id/halls` : ดึงรายชื่อโรงฉายของสาขาที่เลือก (Master Data)
 * `GET /api/movies/:movie_id/showtimes` : ดึงรายการรอบฉายของภาพยนตร์ที่เลือก
 
 **Secured Endpoints (ต้องแนบ Authorization: Bearer <Firebase_Token>)**
+* `GET /api/bookings/me` : ดึงประวัติการจองตั๋วของผู้ใช้งาน
 * `GET /api/showtimes/:showtime_id/seats` : ดึงผังที่นั่งและสถานะ (AVAILABLE, LOCKED, BOOKED)
 * `POST /api/bookings/lock` : ส่งคำสั่งล็อกที่นั่งลง Redis (TTL 5 นาที) ป้องกัน Double Booking
 * `POST /api/bookings/confirm` : ยืนยันการชำระเงิน บันทึกลง MongoDB และส่ง Event เข้า RabbitMQ
@@ -97,6 +101,8 @@
 ### วิธีการทดสอบ API ด้วย Postman
 
 เนื่องจากเราปรับสถาปัตยกรรมไปใช้ `ObjectID` ของ MongoDB เป็น Best Practice แล้ว การทดสอบผ่าน Postman จะต้องทำตามขั้นตอนดังนี้:
+
+**Note:** ก่อนทดสอบ API กรุณารันคำสั่ง `go run scripts/seed.go` เพื่อจำลองข้อมูล Master Data (Movies, Cinemas, Showtimes) ลงในฐานข้อมูลของท่านก่อนครับ
 
 **1. หา ObjectID จากฐานข้อมูลจริง**
 เปิดโปรแกรม **MongoDB Compass** เข้าไปที่ฐานข้อมูล `golden_stage_db` 
