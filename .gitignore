@@ -9,3 +9,6 @@
 node_modules/
 dist/
 .DS_Store
+
+# Code Walkthrough
+golden-stage-cinema-server/code_walkthrough.md
