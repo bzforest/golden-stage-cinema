@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"golden-stage-cinema-server/config"
 	"golden-stage-cinema-server/features/bookings"
@@ -25,6 +30,9 @@ func main() {
 
 	// เชื่อมต่อ Redis
 	config.ConnectRedis()
+
+	// เชื่อมต่อ RabbitMQ
+	config.ConnectRabbitMQ()
 
 	// ดึงค่า PORT จาก Environment Variable ถ้าไม่มีให้ใช้ค่าเริ่มต้นเป็น 8080
 	port := os.Getenv("PORT")
@@ -50,9 +58,35 @@ func main() {
 		})
 	}
 
-	log.Printf("Starting Server on Port %s", port)
-	// รัน Server
-	if err := r.Run(":" + port); err != nil {
-		log.Fatal("Failed to start server: ", err)
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
 	}
+
+	// 2. รัน Server ใน Goroutine เพื่อไม่ให้บล็อกการรอสัญญาณปิด
+	go func() {
+		log.Printf("Starting Server on Port %s\n", port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	// 1. สร้าง Channel รอรับสัญญาณ OS (SIGINT = กด Ctrl+C, SIGTERM = สั่งปิดโปรเซส)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// โค้ดจะหยุดรอที่บรรทัดนี้จนกว่าจะมีสัญญาณเข้ามาใน Channel
+	<-quit
+	log.Println("Shutting down server...")
+
+	// 3. กำหนดเวลา Timeout ไว้ 5 วินาที เพื่อให้ Request ที่ค้างอยู่ทำงานให้เสร็จ
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown: ", err)
+	}
+
+	// 4. แสดง Log จังหวะที่กำลังจะปิดตัวลง
+	log.Println("Server exiting")
 }

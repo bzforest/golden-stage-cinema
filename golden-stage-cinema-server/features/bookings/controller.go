@@ -2,6 +2,7 @@ package bookings
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"golden-stage-cinema-server/config"
 
 	"github.com/gin-gonic/gin"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // LockSeatRequest กำหนดรูปแบบของ JSON ที่ส่งมา
@@ -46,4 +48,79 @@ func LockSeat(c *gin.Context) {
 	} else {
 		c.JSON(http.StatusConflict, gin.H{"error": "Seat is already locked by another user"})
 	}
+}
+
+// ConfirmBookingRequest (เหมือน LockSeatRequest แต่อาจมีข้อมูลเพิ่มเติมในอนาคต)
+type ConfirmBookingRequest struct {
+	ShowtimeID string `json:"showtime_id" binding:"required"`
+	SeatNumber string `json:"seat_number" binding:"required"`
+	UserID     string `json:"user_id" binding:"required"`
+}
+
+// ConfirmBooking ฟังก์ชันยืนยันการจอง บันทึกลง Mongo และส่ง Event เข้า RabbitMQ
+func ConfirmBooking(c *gin.Context) {
+	var req ConfirmBookingRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. บันทึกข้อมูลการจองลง MongoDB
+	collection := config.GetCollection("bookings")
+	booking := Booking{
+		ShowtimeID: req.ShowtimeID,
+		SeatNumber: req.SeatNumber,
+		UserID:     req.UserID,
+		Status:     "CONFIRMED",
+		CreatedAt:  time.Now(),
+	}
+
+	_, err := collection.InsertOne(ctx, booking)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save booking to database"})
+		return
+	}
+
+	// 2. ประกาศคิว (Queue) ใน RabbitMQ
+	q, err := config.RabbitChannel.QueueDeclare(
+		"seat_updates", // name
+		true,           // durable
+		false,          // delete when unused
+		false,          // exclusive
+		false,          // no-wait
+		nil,            // arguments
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to declare a queue"})
+		return
+	}
+
+	// สร้าง Payload JSON
+	messageBody, _ := json.Marshal(map[string]string{
+		"showtime_id": req.ShowtimeID,
+		"seat_number": req.SeatNumber,
+		"status":      "CONFIRMED",
+	})
+
+	// 3. ส่งข้อความ (Publish) เข้า RabbitMQ
+	err = config.RabbitChannel.PublishWithContext(ctx,
+		"",     // exchange
+		q.Name, // routing key
+		false,  // mandatory
+		false,  // immediate
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        messageBody,
+		})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish message"})
+		return
+	}
+
+	// ตอบกลับ 200 OK
+	c.JSON(http.StatusOK, gin.H{"message": "Booking confirmed and message queued"})
 }
