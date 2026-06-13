@@ -17,6 +17,7 @@ import (
 	"golden-stage-cinema-server/features/realtime"
 	"golden-stage-cinema-server/features/showtimes"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -48,6 +49,16 @@ func main() {
 
 	// สร้าง Gin Router
 	r := gin.Default()
+
+	// ตั้งค่า CORS Middleware
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// ติดตั้ง Routes ระบบต่างๆ
 	movies.MovieRoutes(r)

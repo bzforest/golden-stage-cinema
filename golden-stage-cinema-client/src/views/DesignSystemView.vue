@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import Navbar from '@/components/layout/Navbar.vue'
+import Footer from '@/components/layout/Footer.vue'
+import SearchBar from '@/components/SearchBar.vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,21 +33,9 @@ const showtimes = ['14:00', '17:30', '20:15', '23:00']
 </script>
 
 <template>
-  <div class="min-h-screen bg-background text-foreground">
-    <!-- Header -->
-    <header class="border-b border-border bg-card/60 backdrop-blur-sm sticky top-0 z-50">
-      <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-primary-foreground" viewBox="0 0 24 24" fill="currentColor"><path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2zM8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2zm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>
-          </div>
-          <span class="text-xl font-bold text-heading">
-            <span class="text-foreground">Golden</span><span class="text-primary">Stage</span>
-          </span>
-        </div>
-        <span class="text-sm text-muted-foreground">Design System v1.0</span>
-      </div>
-    </header>
+  <div class="min-h-screen bg-background text-foreground flex flex-col">
+    <!-- Header / Navbar Component -->
+    <Navbar />
 
     <main class="max-w-7xl mx-auto px-6 py-10 space-y-14">
 
@@ -142,13 +133,8 @@ const showtimes = ['14:00', '17:30', '20:15', '23:00']
       <section>
         <h2 class="text-sm font-semibold text-primary uppercase tracking-widest mb-6">Search Bar</h2>
         <Separator class="mb-8" />
-        <div class="max-w-xl relative">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <Input
-            v-model="searchQuery"
-            placeholder="Search movies..."
-            class="pl-10 bg-card border-border h-11"
-          />
+        <div class="max-w-md">
+          <SearchBar />
         </div>
       </section>
 
@@ -573,17 +559,9 @@ const showtimes = ['14:00', '17:30', '20:15', '23:00']
 
     </main>
 
-    <!-- Footer -->
-    <footer class="border-t border-border mt-20 py-8">
-      <div class="max-w-7xl mx-auto px-6 text-center">
-        <div class="flex items-center justify-center gap-2 mb-3">
-          <div class="w-6 h-6 bg-primary rounded-md flex items-center justify-center">
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-primary-foreground" viewBox="0 0 24 24" fill="currentColor"><path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2zM8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2zm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>
-          </div>
-        </div>
-        <p class="text-sm text-muted-foreground">© 2026 GoldenStage Cinema. All rights reserved.</p>
-        <p class="text-xs text-muted-foreground/60 mt-1">Designed for movie lovers.</p>
-      </div>
-    </footer>
+    <!-- Footer Component -->
+    <div class="mt-auto">
+      <Footer />
+    </div>
   </div>
 </template>
