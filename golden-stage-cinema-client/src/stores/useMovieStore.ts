@@ -13,8 +13,35 @@ export interface Movie {
   rating: number
 }
 
+export interface Cinema {
+  id: string
+  name: string
+  cinema_type?: string
+}
+
+export interface Hall {
+  id: string
+  cinema_id: string
+  name: string
+  capacity: number
+}
+
+export interface Showtime {
+  id: string
+  movie_id: string
+  cinema_id: string
+  hall_id: string
+  start_time: string
+  end_time: string
+}
+
 export const useMovieStore = defineStore('movie', () => {
   const movies = ref<Movie[]>([])
+  const currentMovie = ref<Movie | null>(null)
+  const showtimes = ref<Showtime[]>([])
+  const cinemas = ref<Cinema[]>([])
+  const halls = ref<Hall[]>([])
+  
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
@@ -99,10 +126,98 @@ export const useMovieStore = defineStore('movie', () => {
     }
   }
 
+  const fetchMovieById = async (id: string) => {
+    isLoading.value = true
+    error.value = null
+    try {
+      const response = await api.get(`/movies/${id}`)
+      const movie = response.data
+      currentMovie.value = {
+        id: movie.id || movie._id,
+        title: movie.title || 'Unknown Title',
+        description: movie.synopsis || movie.description || '',
+        posterUrl: movie.poster_url || movie.posterUrl || '',
+        backdropUrl: movie.backdrop_url || movie.backdropUrl || '',
+        genre: movie.genre || 'Unknown Genre',
+        duration: movie.duration_mins ? `${movie.duration_mins}m` : (movie.duration || '0m'),
+        rating: movie.rating || 0
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch movie details:', err)
+      // Fallback: try to find in existing movies list
+      const existing = movies.value.find(m => m.id === id)
+      if (existing) {
+        currentMovie.value = existing
+      } else {
+        error.value = 'ไม่พบข้อมูลภาพยนตร์'
+      }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const fetchCinemas = async () => {
+    try {
+      const response = await api.get('/cinemas')
+      cinemas.value = response.data
+    } catch (err: any) {
+      console.error('Failed to fetch cinemas:', err)
+    }
+  }
+
+  const fetchHallsByCinema = async (cinemaId: string) => {
+    try {
+      const response = await api.get(`/cinemas/${cinemaId}/halls`)
+      // Merge with existing halls array uniquely
+      const newHalls = response.data
+      const existingIds = new Set(halls.value.map(h => h.id))
+      newHalls.forEach((h: Hall) => {
+        if (!existingIds.has(h.id)) {
+          halls.value.push(h)
+        }
+      })
+    } catch (err: any) {
+      console.error(`Failed to fetch halls for cinema ${cinemaId}:`, err)
+    }
+  }
+
+  const fetchShowtimes = async (movieId: string) => {
+    isLoading.value = true
+    error.value = null
+    showtimes.value = []
+    
+    try {
+      const response = await api.get(`/movies/${movieId}/showtimes`)
+      showtimes.value = response.data
+      
+      // After fetching showtimes, fetch cinemas if we haven't
+      if (cinemas.value.length === 0) {
+        await fetchCinemas()
+      }
+      
+      // For each unique cinema in the showtimes, fetch its halls
+      const uniqueCinemaIds = [...new Set(showtimes.value.map(s => s.cinema_id))]
+      await Promise.all(uniqueCinemaIds.map(cid => fetchHallsByCinema(cid)))
+      
+    } catch (err: any) {
+      console.error('Failed to fetch showtimes:', err)
+      // We don't set error.value here because movie details might have loaded successfully
+      // Just leave showtimes empty
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   return {
     movies,
+    currentMovie,
+    showtimes,
+    cinemas,
+    halls,
     isLoading,
     error,
-    fetchMovies
+    fetchMovies,
+    fetchMovieById,
+    fetchShowtimes
   }
 })

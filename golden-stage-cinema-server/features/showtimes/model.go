@@ -8,8 +8,9 @@ import (
 
 // Cinema โมเดลสาขาโรงภาพยนตร์
 type Cinema struct {
-	ID   primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Name string             `bson:"name" json:"name"`
+	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name       string             `bson:"name" json:"name"`
+	CinemaType string             `bson:"cinema_type" json:"cinema_type"`
 }
 
 // Hall โมเดลโรงภาพยนตร์ย่อยในแต่ละสาขา

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMovieStore } from '@/stores/useMovieStore'
 import type { Movie } from '@/stores/useMovieStore'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import Footer from '@/components/layout/Footer.vue'
 import { toast } from 'vue-sonner'
 
 const movieStore = useMovieStore()
+const router = useRouter()
 
 const heroMovie = ref<Movie | null>(null)
 const trendingMovies = ref<Movie[]>([])
@@ -30,9 +32,9 @@ watch(() => movieStore.movies, (newMovies) => {
   }
 }, { immediate: true })
 
-const handleBookClick = (movieTitle: string) => {
-  toast.success(`กำลังนำคุณเข้าสู่หน้าจอจองตั๋วภาพยนตร์: ${movieTitle}`)
-  // In the future, router.push({ name: 'booking', params: { id: movie.id } })
+const handleBookClick = (movie: Movie) => {
+  toast.success(`กำลังนำคุณเข้าสู่หน้าจอรายละเอียดภาพยนตร์: ${movie.title}`)
+  router.push({ name: 'movie-detail', params: { id: movie.id } })
 }
 </script>
 
@@ -109,7 +111,7 @@ const handleBookClick = (movieTitle: string) => {
 
             <!-- Buttons -->
             <div class="flex items-center gap-4">
-              <Button size="lg" class="px-8 h-12 rounded-full font-semibold text-primary-foreground bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 hover:scale-105 transition-transform cursor-pointer" @click="handleBookClick(heroMovie.title)">
+              <Button size="lg" class="px-8 h-12 rounded-full font-semibold text-primary-foreground bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 hover:scale-105 transition-transform" @click="handleBookClick(heroMovie)">
                 Book Tickets
               </Button>
               <Button size="lg" variant="secondary" class="px-8 h-12 rounded-full font-semibold bg-secondary/80 text-foreground backdrop-blur-md hover:bg-secondary border border-border/50 hover:scale-105 transition-transform cursor-pointer">
@@ -143,7 +145,7 @@ const handleBookClick = (movieTitle: string) => {
 
         <!-- Movie Grid -->
         <div v-else class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-          <div v-for="movie in trendingMovies" :key="movie.id" class="group cursor-pointer last:hidden lg:last:block" @click="handleBookClick(movie.title)">
+          <div v-for="movie in trendingMovies" :key="movie.id" class="group cursor-pointer last:hidden lg:last:block" @click="handleBookClick(movie)">
             <!-- Poster Wrapper -->
             <div class="relative overflow-hidden rounded-2xl mb-4 aspect-[2/3] bg-muted border border-border/40 shadow-lg group-hover:border-primary/50 transition-colors duration-300">
               <img 
