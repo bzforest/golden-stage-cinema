@@ -15,3 +15,11 @@ type Booking struct {
 	Status     string             `bson:"status" json:"status"`
 	CreatedAt  time.Time          `bson:"created_at" json:"created_at"`
 }
+
+// AuditLog คือ Struct สำหรับเก็บประวัติเหตุการณ์สำคัญในระบบ
+type AuditLog struct {
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Action    string             `bson:"action" json:"action"`
+	Details   string             `bson:"details" json:"details"`
+	Timestamp time.Time          `bson:"timestamp" json:"timestamp"`
+}
