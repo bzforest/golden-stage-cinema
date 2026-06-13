@@ -16,11 +16,6 @@ const props = defineProps<ToasterProps>()
       '--normal-border': 'var(--border)',
       '--border-radius': 'var(--radius)',
     }"
-    :toast-options="{
-      classes: {
-        toast: 'cursor-default',
-      }
-    }"
     v-bind="props"
   >
     <template #success-icon>

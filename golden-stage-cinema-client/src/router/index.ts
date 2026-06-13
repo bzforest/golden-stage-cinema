@@ -9,9 +9,9 @@ const router = createRouter({
       component: () => import('@/views/DesignSystemView.vue'),
     },
     {
-      // Redirect หน้าแรกไป Design System ไว้ก่อน (จะเปลี่ยนทีหลังเป็น Landing Page)
       path: '/',
-      redirect: '/design',
+      name: 'home',
+      component: () => import('@/views/HomeView.vue'),
     },
   ],
 })
