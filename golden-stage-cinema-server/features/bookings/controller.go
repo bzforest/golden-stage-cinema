@@ -13,6 +13,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type LockSeatRequest struct {
@@ -155,6 +156,81 @@ func GetUserBookings(c *gin.Context) {
 	var bookings []Booking
 	if err = cursor.All(ctx, &bookings); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode bookings"})
+		return
+	}
+
+	if bookings == nil {
+		bookings = []Booking{}
+	}
+
+	c.JSON(http.StatusOK, bookings)
+}
+
+// GetAdminBookings ดึงประวัติการจองทั้งหมดสำหรับผู้ดูแลระบบ พร้อมรองรับการ Filter
+func GetAdminBookings(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	movieIDStr := c.Query("movie_id")
+	dateStr := c.Query("date")
+
+	collection := config.GetCollection("bookings")
+
+	// ใช้ Aggregate Pipeline เพื่อ Join กับ showtimes
+	pipeline := mongo.Pipeline{}
+
+	// 1. $lookup โยงตาราง showtimes เพื่อให้รู้ว่า booking นี้เป็นของหนังเรื่องอะไร
+	pipeline = append(pipeline, bson.D{{Key: "$lookup", Value: bson.D{
+		{Key: "from", Value: "showtimes"},
+		{Key: "localField", Value: "showtime_id"},
+		{Key: "foreignField", Value: "_id"},
+		{Key: "as", Value: "showtime_info"},
+	}}})
+
+	// 2. สร้าง Filter ($match)
+	matchFilter := bson.M{}
+
+	if movieIDStr != "" {
+		if objID, err := primitive.ObjectIDFromHex(movieIDStr); err == nil {
+			matchFilter["showtime_info.movie_id"] = objID
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid movie_id format"})
+			return
+		}
+	}
+
+	if dateStr != "" {
+		if parsedDate, err := time.Parse("2006-01-02", dateStr); err == nil {
+			nextDay := parsedDate.AddDate(0, 0, 1)
+			matchFilter["created_at"] = bson.M{
+				"$gte": parsedDate,
+				"$lt":  nextDay,
+			}
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format, expected YYYY-MM-DD"})
+			return
+		}
+	}
+
+	if len(matchFilter) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilter}})
+	}
+
+	// 3. $project เพื่อลบ showtime_info ออกจากผลลัพธ์สุดท้ายให้ตรงกับโครงสร้าง Booking เดิม
+	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
+		{Key: "showtime_info", Value: 0},
+	}}})
+
+	cursor, err := collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch admin bookings"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var bookings []Booking
+	if err = cursor.All(ctx, &bookings); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode admin bookings"})
 		return
 	}
 

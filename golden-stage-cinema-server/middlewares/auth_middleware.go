@@ -38,6 +38,11 @@ func FirebaseAuthMiddleware() gin.HandlerFunc {
 		// เพื่อให้ API ฝั่ง Booking เอาไปใช้ต่อได้ทันที
 		c.Set("user_id", token.UID)
 
+		// 6. ดึงอีเมลออกจาก Token เพื่อนำไปเช็กสิทธิ์ Role ทีหลัง
+		if email, ok := token.Claims["email"].(string); ok {
+			c.Set("user_email", email)
+		}
+
 		// ปล่อยผ่านให้ไปทำ API ถัดไปได้
 		c.Next()
 	}
