@@ -67,6 +67,9 @@ func main() {
 		})
 	}
 
+	// เริ่มการทำงานของ Worker
+	bookings.StartBookingWorker()
+
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
