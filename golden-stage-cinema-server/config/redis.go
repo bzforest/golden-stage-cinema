@@ -32,5 +32,11 @@ func ConnectRedis() {
 		log.Fatal("Failed to connect to Redis: ", err)
 	}
 
+	// เปิดใช้งาน Keyspace Notifications เพื่อดักฟัง Event การหมดอายุ (Expired)
+	err = RedisClient.ConfigSet(ctx, "notify-keyspace-events", "Ex").Err()
+	if err != nil {
+		log.Printf("Warning: Failed to set notify-keyspace-events: %v\n", err)
+	}
+
 	log.Println("Successfully connected to Redis")
 }
