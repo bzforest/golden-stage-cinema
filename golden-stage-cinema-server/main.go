@@ -69,6 +69,8 @@ func main() {
 
 	// เริ่มการทำงานของ Worker
 	bookings.StartBookingWorker()
+	// เริ่มการทำงานของ Redis Timeout Listener
+	bookings.StartRedisTimeoutListener()
 
 	srv := &http.Server{
 		Addr:    ":" + port,

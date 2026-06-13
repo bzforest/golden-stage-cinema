@@ -49,15 +49,31 @@
 
 ## 3. Booking Flow
 
-(รอเติมข้อมูล)
+1. **User เลือกรอบฉายและที่นั่ง:** ฝั่ง Client ดึงผังที่นั่งจาก API `GET /api/showtimes/:showtime_id/seats` (สถานะ AVAILABLE)
+2. **User กดล็อกที่นั่ง:** Client ยิง API `POST /api/bookings/lock` ส่ง `{showtime_id, seat_number}`
+   - Backend ใช้ **Redis SETNX** สร้าง Key ล็อกที่นั่งเป็นเวลา 5 นาที
+   - ส่งข้อความเข้า **RabbitMQ** แจ้งสถานะ LOCKED เพื่ออัปเดตหน้าจอผ่าน **WebSocket**
+3. **การชำระเงินและการยืนยัน:**
+   - **กรณีชำระเงินสำเร็จ (ภายใน 5 นาที):** Client ยิง API `POST /api/bookings/confirm`
+     - Backend บันทึกข้อมูลลง MongoDB (สถานะ CONFIRMED)
+     - ส่งข้อความเข้า RabbitMQ เพื่อแจ้งสถานะ BOOKED และทริกเกอร์ Worker ให้บันทึก Audit Log / จำลองส่งอีเมล
+   - **กรณีชำระเงินไม่ทัน (Timeout):**
+     - Key ใน Redis จะหมดอายุอัตโนมัติ (Expired)
+     - **Timeout Listener** ฝั่ง Backend ดักจับ Event หมดอายุจาก Keyspace Notifications
+     - ส่งข้อความสถานะ AVAILABLE กลับเข้า RabbitMQ และ WebSocket เพื่อปลดล็อกที่นั่งคืนสู่หน้าเว็บ
 
 ## 4. Redis Lock Strategy
 
-(รอเติมข้อมูล)
+เพื่อป้องกันปัญหาจองที่นั่งซ้ำซ้อน (Double Booking) ขณะที่ผู้ใช้หลายคนกดเลือกที่นั่งพร้อมกัน ระบบจึงเลือกใช้ **Redis Distributed Lock (SETNX - Set if Not Exists)**
+- **ความเร็ว:** Redis ทำงานบน Memory การเช็กว่าที่นั่งถูกล็อกหรือยังทำได้รวดเร็วมากระดับมิลลิวินาที
+- **Atomic Operation:** คำสั่ง SETNX การันตีได้ว่าถ้ามีคำสั่ง 2 ตัวเข้ามาพร้อมกัน ตัวหนึ่งจะสำเร็จ (True) และอีกตัวจะล้มเหลว (False) แน่นอน ช่วยตัดปัญหาสภาพการแข่งขัน (Race Condition)
+- **TTL (Time To Live):** ล็อกมีการกำหนดเวลาตายชัดเจนที่ 5 นาที หากกระบวนการฝั่งแอปมีปัญหา (เช่น เน็ตหลุด แอปแครช) ล็อกก็จะถูกปลดคืนอัตโนมัติโดยไม่ค้างในระบบ
 
 ## 5. Message Queue
 
-(รอเติมข้อมูล)
+ระบบใช้ **RabbitMQ** เป็นศูนย์กลางในการสื่อสารเพื่อกระจาย Event โดยไม่ต้องพึ่งพา API หลัก (Decoupling) ประโยชน์หลัก 2 ข้อ:
+1. **Real-time Seat Updates:** เมื่อมีการ Lock, Confirm, หรือ Timeout สถานะเก้าอี้จะถูก Publish ลงคิว `seat_updates` และฝั่ง WebSocket จะ Consume ออกมากระจายให้ User ที่หน้าจอทันที ทำให้เห็นที่นั่งเด้งสลับสถานะแบบ Real-time 
+2. **Background Processing (Worker):** เมื่อยืนยันการจองสำเร็จ Worker จะมารับงานบันทึก Audit Logs ลง MongoDB และจำลองส่ง Email การันตีว่าข้อมูลจะไม่ตกหล่นแม้ยอดจองจะพุ่งสูง และช่วยให้ API ไม่โหลดหนักไปทำงานอื่น
 
 ## 6. Assumptions & Trade-offs
 
@@ -66,7 +82,12 @@
 
 ## 7. วิธีรันระบบ
 
-(รอเติมข้อมูล)
+ระบบได้ถูกตั้งค่า Docker Container ไว้เรียบร้อยแล้ว รันคำสั่งเดียวระบบจะผูก MongoDB, Redis, RabbitMQ และ Go Backend เข้าด้วยกัน:
+
+```bash
+docker compose up --build
+```
+ระบบ Backend จะรันอยู่ที่ `http://localhost:8080`
 
 ## 8. Test Credentials
 
