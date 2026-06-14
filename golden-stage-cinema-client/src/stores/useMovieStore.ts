@@ -252,6 +252,13 @@ export const useMovieStore = defineStore('movie', () => {
     }
   }
 
+  const updateSeatStatus = (seatNumber: string, status: 'AVAILABLE' | 'LOCKED' | 'RESERVED' | 'BOOKED') => {
+    const seat = seats.value.find(s => s.seat_number === seatNumber)
+    if (seat) {
+      seat.status = status
+    }
+  }
+
   return {
     movies,
     currentMovie,
@@ -268,6 +275,7 @@ export const useMovieStore = defineStore('movie', () => {
     fetchShowtimeById,
     fetchSeatsByShowtime,
     fetchCinemas,
-    fetchHallsByCinema
+    fetchHallsByCinema,
+    updateSeatStatus
   }
 })

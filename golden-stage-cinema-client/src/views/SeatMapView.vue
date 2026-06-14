@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeftIcon, MonitorIcon } from '@lucide/vue'
 import Navbar from '@/components/layout/Navbar.vue'
 import Footer from '@/components/layout/Footer.vue'
+import { api } from '@/lib/axios'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,12 +39,55 @@ onMounted(async () => {
 
 })
 
+// WebSocket Connection
+let ws: WebSocket | null = null
+let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+
+const connectWebSocket = () => {
+  if (ws) return
+  
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = import.meta.env.VITE_API_BASE_URL 
+    ? new URL(import.meta.env.VITE_API_BASE_URL).host 
+    : 'localhost:8080'
+    
+  ws = new WebSocket(`${wsProtocol}//${host}/ws/seats/${showtimeId}`)
+  
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.seat_number && data.status) {
+        movieStore.updateSeatStatus(data.seat_number, data.status)
+        // Note: If seat gets booked by someone else, we might want to unselect it
+        if (data.status === 'BOOKED' && selectedSeatIds.value.has(data.seat_id)) {
+           const newSet = new Set(selectedSeatIds.value)
+           newSet.delete(data.seat_id)
+           selectedSeatIds.value = newSet
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse WS message:', e)
+    }
+  }
+  
+  ws.onclose = () => {
+    ws = null
+    reconnectTimeout = setTimeout(connectWebSocket, 3000)
+  }
+  
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error)
+    ws?.close()
+  }
+}
+
 // Auto-center the seat map on mobile when data finishes loading
 watch(() => movieStore.isLoading, (isLoading) => {
   if (!isLoading && movieStore.seats.length > 0) {
     nextTick(() => {
       centerSeatMap()
     })
+    connectWebSocket()
   }
 })
 
@@ -57,6 +101,12 @@ const releaseSelectedSeats = () => {
 }
 
 onBeforeUnmount(() => {
+  if (reconnectTimeout) clearTimeout(reconnectTimeout)
+  if (ws) {
+    ws.onclose = null // prevent reconnect
+    ws.close()
+    ws = null
+  }
   releaseSelectedSeats()
   selectedSeatIds.value.clear()
 })
@@ -107,16 +157,38 @@ const getSeatGroups = (row: string) => {
 }
 
 // Seat interaction
-const toggleSeat = (seat: ShowtimeSeat) => {
+const toggleSeat = async (seat: ShowtimeSeat) => {
   if (seat.status !== 'AVAILABLE') return
 
   const newSet = new Set(selectedSeatIds.value)
   if (newSet.has(seat.id)) {
+    // Local deselect
     newSet.delete(seat.id)
+    selectedSeatIds.value = newSet
   } else {
-    newSet.add(seat.id)
+    try {
+      // 1. Send lock request to API
+      // Note: This will return 401 if user is not logged in
+      await api.post('/bookings/lock', {
+        showtime_id: showtimeId,
+        seat_number: seat.seat_number
+      })
+      
+      // 2. Lock success -> update state
+      newSet.add(seat.id)
+      selectedSeatIds.value = newSet
+      
+    } catch (error: any) {
+      console.error('Failed to lock seat:', error)
+      if (error.response?.status === 401) {
+        alert('กรุณาเข้าสู่ระบบก่อนจองที่นั่งครับ (Please login first)')
+      } else {
+        alert('ที่นั่งนี้ถูกจองไปแล้วโดยผู้ใช้อื่น หรือมีปัญหาในการจอง')
+        // Refresh seats to get actual state
+        movieStore.fetchSeatsByShowtime(showtimeId)
+      }
+    }
   }
-  selectedSeatIds.value = newSet
 }
 
 const isSeatSelected = (seatId: string) => selectedSeatIds.value.has(seatId)
