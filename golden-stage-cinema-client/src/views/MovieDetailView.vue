@@ -133,8 +133,12 @@ const filteredShowtimes = computed(() => {
 })
 
 const handleShowtimeClick = (showtimeId: string) => {
-  // router.push({ name: 'seat-map', params: { showtimeId } })
-  console.log('Ready to navigate to seat map with ID:', showtimeId)
+  // Find the showtime and set it in the store before navigating
+  const showtime = movieStore.showtimes.find(s => s.id === showtimeId)
+  if (showtime) {
+    movieStore.currentShowtime = showtime
+  }
+  router.push({ name: 'seat-map', params: { showtimeId } })
 }
 </script>
 

@@ -35,12 +35,23 @@ export interface Showtime {
   end_time: string
 }
 
+export interface ShowtimeSeat {
+  id: string
+  showtime_id: string
+  seat_number: string
+  type: string
+  status: string
+  price: number
+}
+
 export const useMovieStore = defineStore('movie', () => {
   const movies = ref<Movie[]>([])
   const currentMovie = ref<Movie | null>(null)
   const showtimes = ref<Showtime[]>([])
+  const currentShowtime = ref<Showtime | null>(null)
   const cinemas = ref<Cinema[]>([])
   const halls = ref<Hall[]>([])
+  const seats = ref<ShowtimeSeat[]>([])
   
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -208,16 +219,55 @@ export const useMovieStore = defineStore('movie', () => {
     }
   }
 
+  const fetchShowtimeById = async (showtimeId: string) => {
+    isLoading.value = true
+    try {
+      const existing = showtimes.value.find(s => s.id === showtimeId)
+      if (existing) {
+        currentShowtime.value = existing
+        return
+      }
+      const response = await api.get(`/showtimes/${showtimeId}`)
+      currentShowtime.value = response.data
+    } catch (err: any) {
+      console.error('Failed to fetch showtime:', err)
+      error.value = 'ไม่พบข้อมูลรอบฉาย'
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const fetchSeatsByShowtime = async (showtimeId: string) => {
+    isLoading.value = true
+    error.value = null
+    seats.value = []
+    try {
+      const response = await api.get(`/showtimes/${showtimeId}/seats`)
+      seats.value = response.data
+    } catch (err: any) {
+      console.error('Failed to fetch seats:', err)
+      error.value = 'ไม่สามารถโหลดข้อมูลที่นั่งได้'
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   return {
     movies,
     currentMovie,
     showtimes,
+    currentShowtime,
     cinemas,
     halls,
+    seats,
     isLoading,
     error,
     fetchMovies,
     fetchMovieById,
-    fetchShowtimes
+    fetchShowtimes,
+    fetchShowtimeById,
+    fetchSeatsByShowtime,
+    fetchCinemas,
+    fetchHallsByCinema
   }
 })

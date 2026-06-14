@@ -18,6 +18,11 @@ const router = createRouter({
       name: 'movie-detail',
       component: () => import('@/views/MovieDetailView.vue'),
     },
+    {
+      path: '/booking/:showtimeId',
+      name: 'seat-map',
+      component: () => import('@/views/SeatMapView.vue'),
+    },
   ],
   scrollBehavior(to, from, savedPosition) {
     // ถ้าย้อนกลับ (Back/Forward) ให้จำตำแหน่งเดิม แต่ถ้ากดไปหน้าใหม่ ให้ขึ้นไปบนสุด

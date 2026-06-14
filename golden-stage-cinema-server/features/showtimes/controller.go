@@ -13,6 +13,34 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// GetShowtimeByID ดึงข้อมูลรอบฉาย 1 รอบ
+func GetShowtimeByID(c *gin.Context) {
+	showtimeIDStr := c.Param("showtime_id")
+	if showtimeIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "showtime_id is required"})
+		return
+	}
+
+	showtimeID, err := primitive.ObjectIDFromHex(showtimeIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid showtime_id format"})
+		return
+	}
+
+	collection := config.GetCollection("showtimes")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var showtime Showtime
+	err = collection.FindOne(ctx, bson.M{"_id": showtimeID}).Decode(&showtime)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Showtime not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, showtime)
+}
+
 // GetShowtimesByMovie ดึงข้อมูลรอบฉายทั้งหมดของหนังเรื่องหนึ่ง
 func GetShowtimesByMovie(c *gin.Context) {
 	movieIDStr := c.Param("movie_id")
