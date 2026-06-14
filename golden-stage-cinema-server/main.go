@@ -78,6 +78,8 @@ func main() {
 		})
 	}
 
+	// เริ่มการทำงานของ WebSocket Consumer (ดักฟัง RabbitMQ แล้ว Fan-out ให้ทุก Client)
+	realtime.StartConsumer()
 	// เริ่มการทำงานของ Worker
 	bookings.StartBookingWorker()
 	// เริ่มการทำงานของ Redis Timeout Listener

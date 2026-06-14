@@ -71,25 +71,20 @@ func StartRedisTimeoutListener() {
 				}(showtimeID, seatNumber)
 
 				// 2. Broadcast สถานะกลับไปหา Frontend ผ่าน WebSocket
-				// ทำได้โดยการโยน Message กลับเข้า RabbitMQ queue "seat_updates"
 				if config.RabbitChannel != nil {
-					q, err := config.RabbitChannel.QueueDeclare(
-						"seat_updates", true, false, false, false, nil,
-					)
-					if err == nil {
-						messageBody, _ := json.Marshal(map[string]string{
-							"showtime_id": showtimeID,
-							"seat_number": seatNumber,
-							"status":      "AVAILABLE",
-						})
+					config.RabbitChannel.ExchangeDeclare("seat_updates_ex", "fanout", true, false, false, false, nil)
+					messageBody, _ := json.Marshal(map[string]string{
+						"showtime_id": showtimeID,
+						"seat_number": seatNumber,
+						"status":      "AVAILABLE",
+					})
 
-						pubCtx, cancelPub := context.WithTimeout(context.Background(), 5*time.Second)
-						config.RabbitChannel.PublishWithContext(pubCtx, "", q.Name, false, false, amqp.Publishing{
-							ContentType: "application/json",
-							Body:        messageBody,
-						})
-						cancelPub()
-					}
+					pubCtx, cancelPub := context.WithTimeout(context.Background(), 5*time.Second)
+					config.RabbitChannel.PublishWithContext(pubCtx, "seat_updates_ex", "", false, false, amqp.Publishing{
+						ContentType: "application/json",
+						Body:        messageBody,
+					})
+					cancelPub()
 				}
 			}
 		}

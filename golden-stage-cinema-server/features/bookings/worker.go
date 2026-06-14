@@ -2,6 +2,7 @@ package bookings
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"time"
 
@@ -15,8 +16,19 @@ func StartBookingWorker() {
 		return
 	}
 
+	config.RabbitChannel.ExchangeDeclare("seat_updates_ex", "fanout", true, false, false, false, nil)
+	q, err := config.RabbitChannel.QueueDeclare("booking_worker_queue", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Failed to declare worker queue: %v", err)
+	}
+
+	err = config.RabbitChannel.QueueBind(q.Name, "", "seat_updates_ex", false, nil)
+	if err != nil {
+		log.Fatalf("Failed to bind worker queue: %v", err)
+	}
+
 	msgs, err := config.RabbitChannel.Consume(
-		"seat_updates", // queue name
+		q.Name,         // queue name
 		"",             // consumer
 		true,           // auto-ack
 		false,          // exclusive
@@ -31,7 +43,15 @@ func StartBookingWorker() {
 	// ใช้ Goroutine เพื่อให้วนลูปรับข้อความแบบ Asynchronous
 	go func() {
 		for msg := range msgs {
-			log.Printf("[Worker] Received message from RabbitMQ: %s\n", string(msg.Body))
+			// แกะ Payload ออกมาเพื่อกรองเอาเฉพาะการจองที่สำเร็จ
+			var payload map[string]string
+			if err := json.Unmarshal(msg.Body, &payload); err == nil {
+				if payload["status"] != "CONFIRMED" {
+					continue // กรองเอาเฉพาะข้อมูลการจองสำเร็จเท่านั้น
+				}
+			}
+
+			log.Printf("[Worker] Received CONFIRMED message from RabbitMQ: %s\n", string(msg.Body))
 
 			// บันทึก Audit Log ลง MongoDB
 			auditLog := AuditLog{

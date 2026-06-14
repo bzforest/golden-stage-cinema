@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMovieStore, type ShowtimeSeat } from '@/stores/useMovieStore'
+import { useAuthStore } from '@/stores/useAuthStore'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeftIcon, MonitorIcon } from '@lucide/vue'
@@ -12,6 +13,7 @@ import { api } from '@/lib/axios'
 const route = useRoute()
 const router = useRouter()
 const movieStore = useMovieStore()
+const authStore = useAuthStore()
 
 const showtimeId = route.params.showtimeId as string
 const selectedSeatIds = ref<Set<string>>(new Set())
@@ -37,6 +39,14 @@ onMounted(async () => {
     await movieStore.fetchMovieById(movieStore.currentShowtime.movie_id)
   }
 
+  // Populate selected seats from the fetched data
+  const initialSelected = new Set<string>()
+  movieStore.seats.forEach(s => {
+    if (s.status === 'SELECTED') {
+      initialSelected.add(s.id)
+    }
+  })
+  selectedSeatIds.value = initialSelected
 })
 
 // WebSocket Connection
@@ -57,7 +67,17 @@ const connectWebSocket = () => {
     try {
       const data = JSON.parse(event.data)
       if (data.seat_number && data.status) {
-        movieStore.updateSeatStatus(data.seat_number, data.status)
+        let finalStatus = data.status
+        
+        // Handle WebSocket Boomerang (our own lock comes back as LOCKED)
+        if (data.status === 'LOCKED') {
+          if (data.user_id && authStore.user && data.user_id === authStore.user.uid) {
+            finalStatus = 'SELECTED'
+          }
+        }
+        
+        movieStore.updateSeatStatus(data.seat_number, finalStatus as any)
+        
         // Note: If seat gets booked by someone else, we might want to unselect it
         if (data.status === 'BOOKED' && selectedSeatIds.value.has(data.seat_id)) {
            const newSet = new Set(selectedSeatIds.value)
@@ -94,9 +114,10 @@ watch(() => movieStore.isLoading, (isLoading) => {
 // Prepare seat release for unmounting or navigating away
 const releaseSelectedSeats = () => {
   if (selectedSeatIds.value.size > 0) {
-    // TODO: Send WebSocket or API request to unlock these seats immediately
-    // e.g. api.post(`/bookings/unlock`, { showtime_id: showtimeId, seats: Array.from(selectedSeatIds.value) })
-    console.log('TODO: Release locked seats before leaving:', Array.from(selectedSeatIds.value))
+    const seatsToRelease = movieStore.seats.filter(s => selectedSeatIds.value.has(s.id))
+    seatsToRelease.forEach(seat => {
+      api.delete(`/bookings/lock/${showtimeId}/${seat.seat_number}`).catch(e => console.error('Unlock failed', e))
+    })
   }
 }
 
@@ -158,13 +179,27 @@ const getSeatGroups = (row: string) => {
 
 // Seat interaction
 const toggleSeat = async (seat: ShowtimeSeat) => {
-  if (seat.status !== 'AVAILABLE') return
+  if (seat.status !== 'AVAILABLE' && !isSeatSelected(seat.id)) return
 
   const newSet = new Set(selectedSeatIds.value)
   if (newSet.has(seat.id)) {
-    // Local deselect
+    // 1. OPTIMISTIC UPDATE FIRST (เปลี่ยนสถานะทันทีไม่ต้องรอ API ตอบ)
+    const prevStatus = seat.status
     newSet.delete(seat.id)
     selectedSeatIds.value = newSet
+    movieStore.updateSeatStatus(seat.seat_number, 'AVAILABLE')
+
+    try {
+      // 2. Local deselect & API unlock
+      await api.delete(`/bookings/lock/${showtimeId}/${seat.seat_number}`)
+    } catch (error) {
+      console.error('Failed to unlock seat:', error)
+      // REVERT if failed
+      newSet.add(seat.id)
+      selectedSeatIds.value = newSet
+      movieStore.updateSeatStatus(seat.seat_number, prevStatus as any)
+      alert('มีปัญหาในการปลดล็อกที่นั่ง')
+    }
   } else {
     try {
       // 1. Send lock request to API
@@ -297,13 +332,14 @@ const handleContinue = () => {
 
                     <!-- Left Group (1-5) -->
                     <div class="flex gap-1.5 md:gap-2">
-                      <button v-for="seat in getSeatGroups(row).left" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE'"
+                      <button v-for="seat in getSeatGroups(row).left" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE' && seat.status !== 'SELECTED'"
                         :title="`${seat.seat_number} - ฿${seat.price}`"
                         class="w-8 h-8 md:w-9 md:h-9 rounded-t-lg text-xs font-bold transition-all duration-200 flex items-center justify-center cursor-pointer shrink-0"
                         :class="{
                           'bg-muted/60 border border-border/40 hover:bg-muted hover:border-primary/50 text-muted-foreground hover:text-white': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
-                          'bg-primary text-primary-foreground shadow-md shadow-primary/30 scale-105': isSeatSelected(seat.id),
-                          'bg-red-900/40 border border-red-900/30 text-red-900/50 cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'LOCKED',
+                          'bg-yellow-500 text-yellow-950 shadow-md shadow-yellow-500/30 scale-105 border-2 border-yellow-500': isSeatSelected(seat.id),
+                          'bg-red-500 border border-red-600 text-white cursor-not-allowed': seat.status === 'LOCKED',
+                          'bg-muted opacity-50 border border-border/30 text-muted-foreground cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'BOOKED',
                         }">
                         {{ seat.seat_number.slice(1) }}
                       </button>
@@ -314,13 +350,14 @@ const handleContinue = () => {
 
                     <!-- Right Group (6-10) -->
                     <div class="flex gap-1.5 md:gap-2">
-                      <button v-for="seat in getSeatGroups(row).right" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE'"
+                      <button v-for="seat in getSeatGroups(row).right" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE' && seat.status !== 'SELECTED'"
                         :title="`${seat.seat_number} - ฿${seat.price}`"
                         class="w-8 h-8 md:w-9 md:h-9 rounded-t-lg text-xs font-bold transition-all duration-200 flex items-center justify-center cursor-pointer shrink-0"
                         :class="{
                           'bg-muted/60 border border-border/40 hover:bg-muted hover:border-primary/50 text-muted-foreground hover:text-white': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
-                          'bg-primary text-primary-foreground shadow-md shadow-primary/30 scale-105': isSeatSelected(seat.id),
-                          'bg-red-900/40 border border-red-900/30 text-red-900/50 cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'LOCKED',
+                          'bg-yellow-500 text-yellow-950 shadow-md shadow-yellow-500/30 scale-105 border-2 border-yellow-500': isSeatSelected(seat.id),
+                          'bg-red-500 border border-red-600 text-white cursor-not-allowed': seat.status === 'LOCKED',
+                          'bg-muted opacity-50 border border-border/30 text-muted-foreground cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'BOOKED',
                         }">
                         {{ seat.seat_number.slice(1) }}
                       </button>
@@ -350,13 +387,14 @@ const handleContinue = () => {
 
                     <!-- Left Group (1-5) -->
                     <div class="flex gap-1.5 md:gap-2">
-                      <button v-for="seat in getSeatGroups(row).left" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE'"
+                      <button v-for="seat in getSeatGroups(row).left" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE' && seat.status !== 'SELECTED'"
                         :title="`${seat.seat_number} - ฿${seat.price} (Premium)`"
                         class="w-8 h-8 md:w-9 md:h-9 rounded-t-lg text-xs font-bold transition-all duration-200 flex items-center justify-center relative cursor-pointer shrink-0"
                         :class="{
                           'bg-yellow-900/20 border-2 border-yellow-500/50 hover:bg-yellow-900/30 hover:border-yellow-400 text-yellow-500/70 hover:text-yellow-400': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
-                          'bg-primary text-primary-foreground shadow-md shadow-primary/30 scale-105 border-2 border-primary': isSeatSelected(seat.id),
-                          'bg-red-900/40 border border-red-900/30 text-red-900/50 cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'LOCKED',
+                          'bg-yellow-500 text-yellow-950 shadow-md shadow-yellow-500/30 scale-105 border-2 border-yellow-500': isSeatSelected(seat.id),
+                          'bg-red-500 border border-red-600 text-white cursor-not-allowed': seat.status === 'LOCKED',
+                          'bg-muted opacity-50 border border-border/30 text-muted-foreground cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'BOOKED',
                         }">
                         {{ seat.seat_number.slice(1) }}
                       </button>
@@ -367,13 +405,14 @@ const handleContinue = () => {
 
                     <!-- Right Group (6-10) -->
                     <div class="flex gap-1.5 md:gap-2">
-                      <button v-for="seat in getSeatGroups(row).right" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE'"
+                      <button v-for="seat in getSeatGroups(row).right" :key="seat.id" @click="toggleSeat(seat)" :disabled="seat.status !== 'AVAILABLE' && seat.status !== 'SELECTED'"
                         :title="`${seat.seat_number} - ฿${seat.price} (Premium)`"
                         class="w-8 h-8 md:w-9 md:h-9 rounded-t-lg text-xs font-bold transition-all duration-200 flex items-center justify-center relative cursor-pointer shrink-0"
                         :class="{
                           'bg-yellow-900/20 border-2 border-yellow-500/50 hover:bg-yellow-900/30 hover:border-yellow-400 text-yellow-500/70 hover:text-yellow-400': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
-                          'bg-primary text-primary-foreground shadow-md shadow-primary/30 scale-105 border-2 border-primary': isSeatSelected(seat.id),
-                          'bg-red-900/40 border border-red-900/30 text-red-900/50 cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'LOCKED',
+                          'bg-yellow-500 text-yellow-950 shadow-md shadow-yellow-500/30 scale-105 border-2 border-yellow-500': isSeatSelected(seat.id),
+                          'bg-red-500 border border-red-600 text-white cursor-not-allowed': seat.status === 'LOCKED',
+                          'bg-muted opacity-50 border border-border/30 text-muted-foreground cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'BOOKED',
                         }">
                         {{ seat.seat_number.slice(1) }}
                       </button>
@@ -389,17 +428,21 @@ const handleContinue = () => {
             </div>
 
             <!-- Legend -->
-            <div class="flex items-center justify-center gap-6 md:gap-8 mt-10 pb-4">
+            <div class="flex items-center justify-center gap-4 md:gap-6 mt-10 pb-4 flex-wrap">
               <div class="flex items-center gap-2">
                 <div class="w-5 h-5 rounded-sm bg-muted/60 border border-border/40"></div>
                 <span class="text-xs text-muted-foreground">Available</span>
               </div>
               <div class="flex items-center gap-2">
-                <div class="w-5 h-5 rounded-sm bg-primary"></div>
+                <div class="w-5 h-5 rounded-sm bg-yellow-500 border-2 border-yellow-500"></div>
                 <span class="text-xs text-muted-foreground">Selected</span>
               </div>
               <div class="flex items-center gap-2">
-                <div class="w-5 h-5 rounded-sm bg-red-900/40 border border-red-900/30"></div>
+                <div class="w-5 h-5 rounded-sm bg-red-500 border border-red-600"></div>
+                <span class="text-xs text-muted-foreground">Locked</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-sm bg-muted opacity-50 border border-border/30"></div>
                 <span class="text-xs text-muted-foreground">Booked</span>
               </div>
               <div class="flex items-center gap-2">

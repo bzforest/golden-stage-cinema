@@ -12,6 +12,7 @@ func BookingRoutes(router *gin.Engine) {
 	bookingGroup.Use(middlewares.FirebaseAuthMiddleware())
 	{
 		bookingGroup.POST("/lock", LockSeat)
+		bookingGroup.DELETE("/lock/:showtime_id/:seat_number", UnlockSeat)
 		bookingGroup.POST("/confirm", ConfirmBooking)
 		bookingGroup.GET("/me", GetUserBookings)
 	}
