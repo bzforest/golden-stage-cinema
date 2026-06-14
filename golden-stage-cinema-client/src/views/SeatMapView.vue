@@ -257,9 +257,8 @@ const showtimeInfo = computed(() => {
 })
 
 const handleContinue = () => {
-  // TODO: Implement payment/lock flow
-  console.log('Selected seats:', selectedSeats.value.map(s => s.seat_number))
-  console.log('Total price:', totalPrice.value)
+  if (selectedSeats.value.length === 0) return
+  router.push({ name: 'booking-summary', params: { showtimeId: showtimeId } })
 }
 </script>
 
