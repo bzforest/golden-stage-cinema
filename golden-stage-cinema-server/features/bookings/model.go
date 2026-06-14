@@ -6,6 +6,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+type ConfirmBookingRequest struct {
+	ShowtimeID  string   `json:"showtime_id" binding:"required"`
+	SeatNumbers []string `json:"seat_numbers" binding:"required,min=1,max=10"`
+}
+
 // Booking คือ Struct ที่จับคู่กับ Document ใน Collection 'bookings'
 type Booking struct {
 	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`

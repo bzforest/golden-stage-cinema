@@ -27,8 +27,9 @@ type Showtime struct {
 	MovieID   primitive.ObjectID `bson:"movie_id" json:"movie_id"`
 	CinemaID  primitive.ObjectID `bson:"cinema_id" json:"cinema_id"`
 	HallID    primitive.ObjectID `bson:"hall_id" json:"hall_id"`
-	StartTime time.Time          `bson:"start_time" json:"start_time"`
-	EndTime   time.Time          `bson:"end_time" json:"end_time"`
+	StartTime   time.Time          `bson:"start_time" json:"start_time"`
+	EndTime     time.Time          `bson:"end_time" json:"end_time"`
+	BookedSeats []string           `bson:"booked_seats" json:"booked_seats"`
 }
 
 // ShowtimeSeat โมเดลสถานะเก้าอี้ของแต่ละรอบฉาย

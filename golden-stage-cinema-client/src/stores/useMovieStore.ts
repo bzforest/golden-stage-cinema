@@ -53,6 +53,7 @@ export const useMovieStore = defineStore('movie', () => {
   const cinemas = ref<Cinema[]>([])
   const halls = ref<Hall[]>([])
   const seats = ref<ShowtimeSeat[]>([])
+  const lastBookedSeats = ref<ShowtimeSeat[]>([])
   
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -280,6 +281,7 @@ export const useMovieStore = defineStore('movie', () => {
     fetchSeatsByShowtime,
     fetchCinemas,
     fetchHallsByCinema,
-    updateSeatStatus
+    updateSeatStatus,
+    lastBookedSeats
   }
 })

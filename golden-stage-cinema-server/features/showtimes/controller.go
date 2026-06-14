@@ -126,6 +126,25 @@ func GetSeatsByShowtime(c *gin.Context) {
 		return
 	}
 
+	// 1.5 ดึงประวัติการจองจาก booked_seats ของ showtimes (Single Source of Truth แบบ Array)
+	showtimesCollection := config.GetCollection("showtimes")
+	var showtime Showtime
+	err = showtimesCollection.FindOne(ctx, bson.M{"_id": showtimeID}).Decode(&showtime)
+	if err == nil {
+		bookedMap := make(map[string]bool)
+		for _, seat := range showtime.BookedSeats {
+			bookedMap[seat] = true
+		}
+		for i := range seats {
+			// บังคับเปลี่ยนสถานะตาม booked_seats
+			if bookedMap[seats[i].SeatNumber] {
+				seats[i].Status = "BOOKED"
+			} else {
+				seats[i].Status = "AVAILABLE"
+			}
+		}
+	}
+
 	// 2. ดึงสถานะการล็อก (LOCKED) จาก Redis เพื่อมา Merge กับข้อมูลใน Database
 	keys := make([]string, 0, len(seats))
 	for _, seat := range seats {

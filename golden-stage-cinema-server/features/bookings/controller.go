@@ -41,6 +41,17 @@ func LockSeat(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// 1. Rate Limiting: Max 20 requests per minute
+	rateLimitKey := fmt.Sprintf("rate_limit:lock:%s", userID)
+	count, err := config.RedisClient.Incr(ctx, rateLimitKey).Result()
+	if err == nil && count == 1 {
+		config.RedisClient.Expire(ctx, rateLimitKey, time.Minute)
+	}
+	if count > 20 {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Please slow down."})
+		return
+	}
+
 	// สร้าง Redis Key
 	key := fmt.Sprintf("lock:seat:%s:%s", req.ShowtimeID, req.SeatNumber)
 
@@ -122,11 +133,6 @@ func UnlockSeat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Seat unlocked successfully"})
 }
 
-type ConfirmBookingRequest struct {
-	ShowtimeID string `json:"showtime_id" binding:"required"`
-	SeatNumber string `json:"seat_number" binding:"required"`
-}
-
 // ConfirmBooking ฟังก์ชันยืนยันการจอง บันทึกลง Mongo และส่ง Event เข้า RabbitMQ
 func ConfirmBooking(c *gin.Context) {
 	var req ConfirmBookingRequest
@@ -138,6 +144,7 @@ func ConfirmBooking(c *gin.Context) {
 
 	// ดึงไอดีผู้ใช้ตัวจริงจาก Middleware
 	userID := c.MustGet("user_id").(string)
+	cleanTokenUserID := strings.TrimSpace(strings.Trim(userID, "\""))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -148,49 +155,99 @@ func ConfirmBooking(c *gin.Context) {
 		return
 	}
 
-	// 1. บันทึกข้อมูลการจองลง MongoDB
-	collection := config.GetCollection("bookings")
-	booking := Booking{
-		ShowtimeID: showtimeID,
-		SeatNumber: req.SeatNumber,
-		UserID:     userID,
-		Status:     "CONFIRMED",
-		CreatedAt:  time.Now(),
+	// 1. Pre-validation: ตรวจสอบ Ownership ใน Redis สำหรับทุกที่นั่งก่อนลงมือทำจริง
+	var lockKeys []string
+	for _, seatNumber := range req.SeatNumbers {
+		lockKeys = append(lockKeys, fmt.Sprintf("lock:seat:%s:%s", req.ShowtimeID, seatNumber))
 	}
 
-	_, err = collection.InsertOne(ctx, booking)
+	vals, err := config.RedisClient.MGet(ctx, lockKeys...).Result()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save booking to database"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check lock ownership"})
 		return
 	}
 
-	// 2. ประกาศ Exchange แบบ Fanout ใน RabbitMQ
+	// เช็กว่าทุกที่นั่งเป็นของเราหรือไม่
+	for i, val := range vals {
+		if val == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Seat lock expired or not locked for seat %s", req.SeatNumbers[i])})
+			return
+		}
+		
+		redisUserID := val.(string)
+		cleanRedisUserID := strings.TrimSpace(strings.Trim(redisUserID, "\""))
+		
+		if cleanRedisUserID != cleanTokenUserID {
+			c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("You are not the owner of seat lock for seat %s", req.SeatNumbers[i])})
+			return
+		}
+	}
+
+	// 1.5 Atomic Reservation via UpdateOne and $nin
+	showtimesCollection := config.GetCollection("showtimes")
+	filter := bson.M{
+		"_id":          showtimeID,
+		"booked_seats": bson.M{"$nin": req.SeatNumbers},
+	}
+	update := bson.M{
+		"$push": bson.M{"booked_seats": bson.M{"$each": req.SeatNumbers}},
+	}
+	updateResult, err := showtimesCollection.UpdateOne(ctx, filter, update)
+	if err != nil || updateResult.ModifiedCount == 0 {
+		config.RedisClient.Del(ctx, lockKeys...)
+		c.JSON(http.StatusConflict, gin.H{"error": "Sorry, some seats were just taken."})
+		return
+	}
+
+	// 2. Bulk Insert: บันทึกข้อมูลการจองลง MongoDB
+	var bookings []interface{}
+	for _, seatNumber := range req.SeatNumbers {
+		bookings = append(bookings, Booking{
+			ShowtimeID: showtimeID,
+			SeatNumber: seatNumber,
+			UserID:     userID,
+			Status:     "CONFIRMED",
+			CreatedAt:  time.Now(),
+		})
+	}
+
+	collection := config.GetCollection("bookings")
+	_, err = collection.InsertMany(ctx, bookings)
+	if err != nil {
+		config.RedisClient.Del(ctx, lockKeys...)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save bookings to database"})
+		return
+	}
+
+	// (3. Bulk Update ถูกนำออกแล้ว เนื่องจากใช้ Single Source of Truth จากตาราง bookings)
+
+	// 4. ลบ Lock ออกจาก Redis ทั้งหมด
+	config.RedisClient.Del(ctx, lockKeys...)
+
+	// 5. ประกาศ Exchange แบบ Fanout ใน RabbitMQ
 	config.RabbitChannel.ExchangeDeclare("seat_updates_ex", "fanout", true, false, false, false, nil)
 
-	// สร้าง Payload JSON
-	messageBody, _ := json.Marshal(map[string]string{
-		"showtime_id": req.ShowtimeID,
-		"seat_number": req.SeatNumber,
-		"status":      "CONFIRMED",
-	})
-
-	// 3. ส่งข้อความ (Publish) เข้า Exchange
-	err = config.RabbitChannel.PublishWithContext(ctx,
-		"seat_updates_ex", // exchange
-		"",                // routing key
-		false,             // mandatory
-		false,             // immediate
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        messageBody,
+	// วนลูป Publish แจ้งสถานะของทีละเก้าอี้ เพื่อให้ฝั่ง Frontend (ที่รับทีละตัว) ทำงานได้เหมือนเดิม
+	for _, seatNumber := range req.SeatNumbers {
+		messageBody, _ := json.Marshal(map[string]string{
+			"showtime_id": req.ShowtimeID,
+			"seat_number": seatNumber,
+			"status":      "BOOKED",
 		})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish message"})
-		return
+		
+		config.RabbitChannel.PublishWithContext(ctx,
+			"seat_updates_ex", // exchange
+			"",                // routing key
+			false,             // mandatory
+			false,             // immediate
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        messageBody,
+			})
 	}
 
 	// ตอบกลับ 200 OK
-	c.JSON(http.StatusOK, gin.H{"message": "Booking confirmed and message queued"})
+	c.JSON(http.StatusOK, gin.H{"message": "Bookings confirmed and messages queued"})
 }
 
 // GetUserBookings ดึงประวัติการจองของผู้ใช้งาน
