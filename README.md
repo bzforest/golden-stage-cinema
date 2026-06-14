@@ -57,10 +57,11 @@
    - **กรณีชำระเงินสำเร็จ (ภายใน 5 นาที):** Client ยิง API `POST /api/bookings/confirm`
      - Backend บันทึกข้อมูลลง MongoDB (สถานะ CONFIRMED)
      - ส่งข้อความเข้า RabbitMQ เพื่อแจ้งสถานะ BOOKED และทริกเกอร์ Worker ให้บันทึก Audit Log / จำลองส่งอีเมล
-   - **กรณีชำระเงินไม่ทัน (Timeout):**
-     - Key ใน Redis จะหมดอายุอัตโนมัติ (Expired)
-     - **Timeout Listener** ฝั่ง Backend ดักจับ Event หมดอายุจาก Keyspace Notifications
-     - ส่งข้อความสถานะ AVAILABLE กลับเข้า RabbitMQ และ WebSocket เพื่อปลดล็อกที่นั่งคืนสู่หน้าเว็บ
+   - **กรณีชำระเงินไม่ทัน (Timeout) หรือกดย้อนกลับ/ปิดหน้าจอ:**
+     - **Explicit Unlock:** หากผู้ใช้กดย้อนกลับหรือเปลี่ยนหน้าเว็บ (ผ่าน `onBeforeUnmount` ของ Vue) Client จะส่ง API หรือ WebSocket กลับไปปลดล็อกเก้าอี้ให้คนอื่นจองได้ทันที
+     - **Auto Expired:** หากผู้ใช้ปิดเบราว์เซอร์กะทันหัน หรือเน็ตหลุด Key ใน Redis จะหมดอายุอัตโนมัติ (Expired) เมื่อครบ 5 นาที
+     - **Timeout Listener** ฝั่ง Backend จะดักจับ Event การหมดอายุจาก Keyspace Notifications
+     - ส่งข้อความสถานะ AVAILABLE กลับเข้า RabbitMQ และ WebSocket เพื่อปลดล็อกที่นั่งคืนสู่หน้าเว็บให้ผู้ใช้ท่านอื่นเห็น
 
 ## 4. Redis Lock Strategy
 
