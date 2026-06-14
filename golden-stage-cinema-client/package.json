@@ -21,6 +21,7 @@
     "axios": "^1.17.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "firebase": "^12.14.0",
     "pinia": "^3.0.4",
     "reka-ui": "^2.9.10",
     "tailwind-merge": "^3.6.0",

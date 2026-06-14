@@ -1,6 +1,21 @@
 <script setup lang="ts">
-import { UserIcon } from '@lucide/vue'
+import { UserIcon, LogOutIcon } from '@lucide/vue'
 import SearchBar from '@/components/SearchBar.vue'
+import { useRouter, useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/useAuthStore'
+
+const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
+
+const handleLogout = async () => {
+  try {
+    await authStore.logout()
+    router.push('/login')
+  } catch (error) {
+    console.error(error)
+  }
+}
 </script>
 
 <template>
@@ -34,11 +49,30 @@ import SearchBar from '@/components/SearchBar.vue'
         </div>
       </div>
 
-      <!-- Right: Profile Icon -->
-      <div class="flex items-center justify-end gap-4 md:w-1/3">
-        <button class="w-9 h-9 rounded-full flex items-center justify-center hover:bg-secondary/80 transition-colors text-muted-foreground hover:text-foreground">
-          <UserIcon class="w-5 h-5 cursor-pointer" />
-        </button>
+      <!-- Right: Profile Icon & Auth -->
+      <div class="flex items-center justify-end gap-3 md:w-1/3">
+        <template v-if="!authStore.isLoading">
+          <template v-if="authStore.user">
+            <span class="text-xs text-muted-foreground hidden sm:inline-block border border-border/50 px-2 py-1 rounded-full bg-muted/20">
+              {{ authStore.user.displayName || authStore.user.email }}
+            </span>
+            <button 
+              @click="handleLogout"
+              title="Sign Out"
+              class="w-9 h-9 rounded-full flex items-center justify-center hover:bg-red-900/20 hover:text-red-500 transition-colors text-muted-foreground"
+            >
+              <LogOutIcon class="w-4 h-4 cursor-pointer" />
+            </button>
+          </template>
+          <template v-else>
+            <button 
+              @click="router.push({ path: '/login', query: { redirect: route.fullPath } })"
+              class="px-5 py-2 text-sm font-bold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-md shadow-primary/20 hover:scale-105"
+            >
+              Sign In
+            </button>
+          </template>
+        </template>
       </div>
 
     </div>

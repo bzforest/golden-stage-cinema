@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/useAuthStore'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -22,15 +23,34 @@ const router = createRouter({
       path: '/booking/:showtimeId',
       name: 'seat-map',
       component: () => import('@/views/SeatMapView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { requiresGuest: true }
     },
   ],
   scrollBehavior(to, from, savedPosition) {
-    // ถ้าย้อนกลับ (Back/Forward) ให้จำตำแหน่งเดิม แต่ถ้ากดไปหน้าใหม่ ให้ขึ้นไปบนสุด
     if (savedPosition) {
       return savedPosition
     } else {
-      return { top: 0, behavior: 'smooth' } // เติม smooth ให้มันเลื่อนขึ้นแบบสมูทๆ ได้ด้วยครับ
+      return { top: 0, behavior: 'smooth' }
     }
+  }
+})
+
+router.beforeEach(async (to, from, next) => {
+  const authStore = useAuthStore()
+  await authStore.waitForInit()
+
+  if (to.meta.requiresAuth && !authStore.user) {
+    next({ path: '/login', query: { redirect: to.fullPath } })
+  } else if (to.meta.requiresGuest && authStore.user) {
+    next({ path: '/' })
+  } else {
+    next()
   }
 })
 
