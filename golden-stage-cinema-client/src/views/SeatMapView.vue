@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/useAuthStore'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeftIcon, MonitorIcon } from '@lucide/vue'
+import { toast } from 'vue-sonner'
 import Navbar from '@/components/layout/Navbar.vue'
 import Footer from '@/components/layout/Footer.vue'
 import { api } from '@/lib/axios'
@@ -52,6 +53,7 @@ onMounted(async () => {
 // WebSocket Connection
 let ws: WebSocket | null = null
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+let hasConnectedBefore = false
 
 const connectWebSocket = () => {
   if (ws) return
@@ -62,6 +64,14 @@ const connectWebSocket = () => {
     : 'localhost:8080'
     
   ws = new WebSocket(`${wsProtocol}//${host}/ws/seats/${showtimeId}`)
+  
+  ws.onopen = () => {
+    if (hasConnectedBefore) {
+      // Re-fetch seats from DB to sync any missed events while disconnected
+      movieStore.fetchSeatsByShowtime(showtimeId)
+    }
+    hasConnectedBefore = true
+  }
   
   ws.onmessage = (event) => {
     try {
@@ -121,6 +131,8 @@ const releaseSelectedSeats = () => {
   }
 }
 
+let isProceeding = false
+
 onBeforeUnmount(() => {
   if (reconnectTimeout) clearTimeout(reconnectTimeout)
   if (ws) {
@@ -128,7 +140,9 @@ onBeforeUnmount(() => {
     ws.close()
     ws = null
   }
-  releaseSelectedSeats()
+  if (!isProceeding) {
+    releaseSelectedSeats()
+  }
   selectedSeatIds.value.clear()
 })
 
@@ -198,7 +212,7 @@ const toggleSeat = async (seat: ShowtimeSeat) => {
       newSet.add(seat.id)
       selectedSeatIds.value = newSet
       movieStore.updateSeatStatus(seat.seat_number, prevStatus as any)
-      alert('มีปัญหาในการปลดล็อกที่นั่ง')
+      toast.error('มีปัญหาในการปลดล็อกที่นั่ง')
     }
   } else {
     try {
@@ -216,10 +230,14 @@ const toggleSeat = async (seat: ShowtimeSeat) => {
     } catch (error: any) {
       console.error('Failed to lock seat:', error)
       if (error.response?.status === 401) {
-        alert('กรุณาเข้าสู่ระบบก่อนจองที่นั่งครับ (Please login first)')
+        toast.error('กรุณาเข้าสู่ระบบก่อนจองที่นั่งครับ')
+      } else if (error.response?.status === 429) {
+        toast.warning('คุณทำรายการเร็วเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง')
+      } else if (error.response?.status === 409 || error.response?.status === 400) {
+        toast.error('ที่นั่งนี้ถูกจองไปแล้วโดยผู้ใช้อื่น')
+        movieStore.fetchSeatsByShowtime(showtimeId)
       } else {
-        alert('ที่นั่งนี้ถูกจองไปแล้วโดยผู้ใช้อื่น หรือมีปัญหาในการจอง')
-        // Refresh seats to get actual state
+        toast.error('มีปัญหาในการจองที่นั่ง')
         movieStore.fetchSeatsByShowtime(showtimeId)
       }
     }
@@ -258,6 +276,7 @@ const showtimeInfo = computed(() => {
 
 const handleContinue = () => {
   if (selectedSeats.value.length === 0) return
+  isProceeding = true
   router.push({ name: 'booking-summary', params: { showtimeId: showtimeId } })
 }
 </script>
@@ -335,7 +354,7 @@ const handleContinue = () => {
                         :title="`${seat.seat_number} - ฿${seat.price}`"
                         class="w-8 h-8 md:w-9 md:h-9 rounded-t-lg text-xs font-bold transition-all duration-200 flex items-center justify-center cursor-pointer shrink-0"
                         :class="{
-                          'bg-muted/60 border border-border/40 hover:bg-muted hover:border-primary/50 text-muted-foreground hover:text-white': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
+                          'bg-muted/80 border border-gray-500/50 hover:bg-muted hover:border-primary/50 text-gray-400 hover:text-white': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
                           'bg-yellow-500 text-yellow-950 shadow-md shadow-yellow-500/30 scale-105 border-2 border-yellow-500': isSeatSelected(seat.id),
                           'bg-red-500 border border-red-600 text-white cursor-not-allowed': seat.status === 'LOCKED',
                           'bg-muted opacity-50 border border-border/30 text-muted-foreground cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'BOOKED',
@@ -353,7 +372,7 @@ const handleContinue = () => {
                         :title="`${seat.seat_number} - ฿${seat.price}`"
                         class="w-8 h-8 md:w-9 md:h-9 rounded-t-lg text-xs font-bold transition-all duration-200 flex items-center justify-center cursor-pointer shrink-0"
                         :class="{
-                          'bg-muted/60 border border-border/40 hover:bg-muted hover:border-primary/50 text-muted-foreground hover:text-white': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
+                          'bg-muted/80 border border-gray-500/50 hover:bg-muted hover:border-primary/50 text-gray-400 hover:text-white': seat.status === 'AVAILABLE' && !isSeatSelected(seat.id),
                           'bg-yellow-500 text-yellow-950 shadow-md shadow-yellow-500/30 scale-105 border-2 border-yellow-500': isSeatSelected(seat.id),
                           'bg-red-500 border border-red-600 text-white cursor-not-allowed': seat.status === 'LOCKED',
                           'bg-muted opacity-50 border border-border/30 text-muted-foreground cursor-not-allowed': seat.status === 'RESERVED' || seat.status === 'BOOKED',

@@ -74,9 +74,7 @@ const goBack = () => {
 }
 
 const proceedToPayment = () => {
-  // To be implemented in the next step
-  console.log('Proceeding to payment...')
-  alert('Redirecting to Payment Gateway...')
+  router.push({ name: 'payment-method', params: { showtimeId: showtimeId } })
 }
 </script>
 

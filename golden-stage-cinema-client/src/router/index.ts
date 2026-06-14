@@ -32,6 +32,18 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/payment/:showtimeId',
+      name: 'payment-method',
+      component: () => import('@/views/PaymentMethodView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/booking-confirmation/:showtimeId',
+      name: 'booking-confirmation',
+      component: () => import('@/views/BookingConfirmationView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('@/views/LoginView.vue'),

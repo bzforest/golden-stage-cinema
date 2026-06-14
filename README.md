@@ -52,7 +52,10 @@
 ระบบการจองที่นั่งแบบ Real-time ถูกออกแบบมาเพื่อแก้ปัญหา Double Booking และเพิ่มประสบการณ์ผู้ใช้ที่ลื่นไหล (Seamless UI) โดยอาศัยการทำงานร่วมกันของ **Vue.js + Go + Redis + RabbitMQ + WebSockets** 
 
 **Flow การทำงาน:**
-1. **User เลือกรอบฉายและที่นั่ง:** Frontend (Vue) ดึงผังที่นั่งจาก API `GET /api/showtimes/:showtime_id/seats` ซึ่ง Backend (Go) จะผสานข้อมูลที่นั่งที่ถูกจองแล้ว (MongoDB) และที่นั่งที่กำลังถูกคนอื่นเลือกอยู่ (Redis) เข้าด้วยกัน
+1. **User เลือกรอบฉายและที่นั่ง (Single Source of Truth):** Frontend (Vue) ดึงผังที่นั่งจาก API `GET /api/showtimes/:showtime_id/seats` ซึ่ง Backend (Go) จะประมวลผลข้อมูลจาก 3 แหล่ง:
+   - ผังที่นั่งดั้งเดิม (Showtime Seats)
+   - ประวัติการจองจริง (Bookings) เพื่อหาสถานะ `BOOKED` อย่างแม่นยำ (ป้องกันปัญหาข้อมูลไม่ตรงกัน)
+   - ข้อมูลการล็อกชั่วคราว (Redis) 
 2. **กดเลือกเก้าอี้ (Optimistic Update):** 
    - ทันทีที่คลิก Vue จะเปลี่ยนสีเก้าอี้เป็นสีเหลืองและยิง API `POST /api/bookings/lock` หรือ `DELETE` ไปยัง Backend
    - หาก API ตอบกลับ `200 OK` (หรือการทำงานระดับ Local state สมบูรณ์) ระบบจะทำการอัปเดต UI ให้ทันทีโดยไม่ต้องรอ WebSocket ขาตั้งรับ (Optimistic Update) ให้ความรู้สึกรวดเร็ว
@@ -67,9 +70,18 @@
    - หากเป็นเก้าอี้ที่ตนเองเพิ่งกด (Boomerang) จะเปลี่ยนสถานะเป็น `SELECTED`
    - หากเป็นของคนอื่น จะตีความเป็น `LOCKED` (เปลี่ยนเป็นสีแดง) ป้องกันความสับสน
    - หากสถานะเป็น `AVAILABLE` ก็จะปลดล็อคสีกลับเป็นปกติให้คนอื่นกดได้ทันที
+   - **(New!) Reconnection Sync:** หากเน็ตผู้ใช้หลุดแล้วกลับมาเชื่อมต่อใหม่ (`ws.onopen`) ระบบจะยิง API ดึงข้อมูลผังที่นั่งทั้งหมดจากฐานข้อมูลมาทับหน้าจออีกครั้ง เพื่ออุดรอยรั่วจากการพลาด Message ช่วงเน็ตหลุด
 7. **การคืนเก้าอี้กลับระบบ (Timeout & Explicit Unlock):**
    - **Explicit Unlock:** เมื่อผู้ใช้กดย้อนกลับ/เปลี่ยนหน้า (`onBeforeUnmount`) หรือกดเปลี่ยนใจ (Deselect) ระบบจะยิง `DELETE /api/bookings/lock` คืนเก้าอี้กลับสู่ระบบทันที
    - **Auto Expired:** หากผู้ใช้ปิดเบราว์เซอร์กะทันหัน Redis TTL จะหมดอายุอัตโนมัติใน 5 นาที และ `timeout_listener` จะทำงานเพื่อ Broadcast สถานะ `AVAILABLE` กลับให้ทุกคนรับทราบพร้อมกัน
+8. **การชำระเงินและ Bulk Confirmation (All-or-Nothing):**
+   - เมื่อผู้ใช้ยืนยันการชำระเงิน Frontend จะมัดรวมเก้าอี้ทั้งหมด (Array) แล้วส่ง Request ไปยัง `POST /api/bookings/confirm` เพียงครั้งเดียว
+   - Backend จะทำ **Pre-validation** โดยเช็ก Lock ใน Redis ของทุกที่นั่งพร้อมกัน หากพบว่ามีแม้แต่ที่นั่งเดียวที่ "หลุด Lock" หรือ "ไม่ใช่ของผู้ใช้คนนี้" ระบบจะทำการ **Abort All** (ยกเลิกทั้งตะกร้า) ทันที
+   - หากผ่าน Pre-validation ระบบจะทำการบันทึกแบบ **Atomic All-or-Nothing** ด้วยคำสั่ง `UpdateOne` โดยใช้ทริค `$nin` เพื่อเช็กซ้ำในระดับ Data Layer หากมีคนแย่งจองในเสี้ยววินาที ระบบจะตีตกและ Rollback ทั้งหมดทันที
+   - หากปลอดภัย 100% ระบบจะสร้างใบเสร็จด้วย `InsertMany`, ปลด Lock ใน Redis คืน, และวนลูป Broadcast ผ่าน RabbitMQ เพื่ออัปเดตสถานะให้ทุก Client เป็น `BOOKED` พร้อมกัน
+9. **Bot Protection & Rate Limiting:**
+   - การยิง API เพื่อกดล็อกเก้าอี้แต่ละครั้งถูกคุมความประพฤติด้วย **Redis Rate Limiting** (จำกัด 20 ครั้ง/นาที)
+   - การ Confirm จองถูกตีกรอบด้วย `Binding Validation` ป้องกันการจ่ายเงินเกิน 10 ที่นั่งต่อรอบบิล ช่วยรับมือคนป่วนระบบ
 
 ## 4. Redis Lock Strategy
 
