@@ -5,18 +5,31 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
 	firebase "firebase.google.com/go"
+	"github.com/joho/godotenv"
 	"google.golang.org/api/option"
 )
 
 func main() {
-	// 1. ระบุ UID ของผู้ใช้ที่ต้องการให้สิทธิ์ Admin
-	// สามารถไปก๊อปปี้ UID ได้จากหน้า Authentication ใน Firebase Console
-	targetUID := "OQ2vt82VeNfhhQ5MImjkqyBcCeM2"
+	// โหลดไฟล์ .env
+	err := godotenv.Load(".env")
+	if err != nil {
+		// ลองโหลดจาก ../.env เผื่อรันจากในโฟลเดอร์ scripts
+		godotenv.Load("../.env")
+	}
+
+	// 1. ดึง UID จาก Environment Variable หรือ Argument
+	targetUID := os.Getenv("ADMIN_UID")
+	
+	// รองรับการรันแบบส่งค่าผ่าน Argument (เช่น go run scripts/set_admin.go UID123)
+	if len(os.Args) > 1 {
+		targetUID = os.Args[1]
+	}
 
 	if len(targetUID) < 10 {
-		log.Fatal("Error: Please provide a valid targetUID at the top of the script.")
+		log.Fatal("Error: Please provide a valid targetUID in .env (ADMIN_UID=...) or pass it as an argument (go run set_admin.go <UID>).")
 	}
 
 	ctx := context.Background()

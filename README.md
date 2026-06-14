@@ -47,21 +47,29 @@
 * **Deployment: Docker & Docker Compose**
   เหตุผล: จัดการ Containerization เพื่อให้ทุก Services สามารถรันทำงานประสานกันได้อย่างสมบูรณ์ด้วยคำสั่ง `docker compose up --build` เพียงคำสั่งเดียว
 
-## 3. Booking Flow
+## 3. Real-time Seat Booking Flow
 
-1. **User เลือกรอบฉายและที่นั่ง:** ฝั่ง Client ดึงผังที่นั่งจาก API `GET /api/showtimes/:showtime_id/seats` (สถานะ AVAILABLE)
-2. **User กดล็อกที่นั่ง:** Client ยิง API `POST /api/bookings/lock` ส่ง `{showtime_id, seat_number}`
-   - Backend ใช้ **Redis SETNX** สร้าง Key ล็อกที่นั่งเป็นเวลา 5 นาที
-   - ส่งข้อความเข้า **RabbitMQ** แจ้งสถานะ LOCKED เพื่ออัปเดตหน้าจอผ่าน **WebSocket**
-3. **การชำระเงินและการยืนยัน:**
-   - **กรณีชำระเงินสำเร็จ (ภายใน 5 นาที):** Client ยิง API `POST /api/bookings/confirm`
-     - Backend บันทึกข้อมูลลง MongoDB (สถานะ CONFIRMED)
-     - ส่งข้อความเข้า RabbitMQ เพื่อแจ้งสถานะ BOOKED และทริกเกอร์ Worker ให้บันทึก Audit Log / จำลองส่งอีเมล
-   - **กรณีชำระเงินไม่ทัน (Timeout) หรือกดย้อนกลับ/ปิดหน้าจอ:**
-     - **Explicit Unlock:** หากผู้ใช้กดย้อนกลับหรือเปลี่ยนหน้าเว็บ (ผ่าน `onBeforeUnmount` ของ Vue) Client จะส่ง API หรือ WebSocket กลับไปปลดล็อกเก้าอี้ให้คนอื่นจองได้ทันที
-     - **Auto Expired:** หากผู้ใช้ปิดเบราว์เซอร์กะทันหัน หรือเน็ตหลุด Key ใน Redis จะหมดอายุอัตโนมัติ (Expired) เมื่อครบ 5 นาที
-     - **Timeout Listener** ฝั่ง Backend จะดักจับ Event การหมดอายุจาก Keyspace Notifications
-     - ส่งข้อความสถานะ AVAILABLE กลับเข้า RabbitMQ และ WebSocket เพื่อปลดล็อกที่นั่งคืนสู่หน้าเว็บให้ผู้ใช้ท่านอื่นเห็น
+ระบบการจองที่นั่งแบบ Real-time ถูกออกแบบมาเพื่อแก้ปัญหา Double Booking และเพิ่มประสบการณ์ผู้ใช้ที่ลื่นไหล (Seamless UI) โดยอาศัยการทำงานร่วมกันของ **Vue.js + Go + Redis + RabbitMQ + WebSockets** 
+
+**Flow การทำงาน:**
+1. **User เลือกรอบฉายและที่นั่ง:** Frontend (Vue) ดึงผังที่นั่งจาก API `GET /api/showtimes/:showtime_id/seats` ซึ่ง Backend (Go) จะผสานข้อมูลที่นั่งที่ถูกจองแล้ว (MongoDB) และที่นั่งที่กำลังถูกคนอื่นเลือกอยู่ (Redis) เข้าด้วยกัน
+2. **กดเลือกเก้าอี้ (Optimistic Update):** 
+   - ทันทีที่คลิก Vue จะเปลี่ยนสีเก้าอี้เป็นสีเหลืองและยิง API `POST /api/bookings/lock` หรือ `DELETE` ไปยัง Backend
+   - หาก API ตอบกลับ `200 OK` (หรือการทำงานระดับ Local state สมบูรณ์) ระบบจะทำการอัปเดต UI ให้ทันทีโดยไม่ต้องรอ WebSocket ขาตั้งรับ (Optimistic Update) ให้ความรู้สึกรวดเร็ว
+3. **การล็อคระดับระบบ (Redis Distributed Lock):**
+   - Backend ใช้ **Redis SETNX** สร้าง Key ล็อคที่นั่ง (มี TTL 5 นาที) เพื่อกันคนอื่นแย่งกด
+4. **กระจายข่าว (RabbitMQ Fanout):**
+   - หลังล็อคสำเร็จ Backend จะ `Publish` ข้อความแจ้งสถานะ (เช่น `LOCKED`) พร้อมแนบ `user_id` เข้าสู่ Exchange แบบ **Fanout** (`seat_updates_ex`)
+5. **แจ้งเตือนทุกคน (WebSockets):**
+   - ฝั่ง WebSocket Hub จะสร้าง Exclusive Queue ขึ้นมาผูกกับ Connection เพื่อรับข้อความจาก Fanout และสั่ง Broadcast ข้อความนั้นไปยัง Client ทุกหน้าที่กำลังดูรอบฉายเดียวกัน
+6. **Vue อัปเดต UI ทันที:**
+   - เมื่อ `ws.onmessage` ฝั่ง Client ได้รับข้อความ จะทำการแยกแยะ `user_id`
+   - หากเป็นเก้าอี้ที่ตนเองเพิ่งกด (Boomerang) จะเปลี่ยนสถานะเป็น `SELECTED`
+   - หากเป็นของคนอื่น จะตีความเป็น `LOCKED` (เปลี่ยนเป็นสีแดง) ป้องกันความสับสน
+   - หากสถานะเป็น `AVAILABLE` ก็จะปลดล็อคสีกลับเป็นปกติให้คนอื่นกดได้ทันที
+7. **การคืนเก้าอี้กลับระบบ (Timeout & Explicit Unlock):**
+   - **Explicit Unlock:** เมื่อผู้ใช้กดย้อนกลับ/เปลี่ยนหน้า (`onBeforeUnmount`) หรือกดเปลี่ยนใจ (Deselect) ระบบจะยิง `DELETE /api/bookings/lock` คืนเก้าอี้กลับสู่ระบบทันที
+   - **Auto Expired:** หากผู้ใช้ปิดเบราว์เซอร์กะทันหัน Redis TTL จะหมดอายุอัตโนมัติใน 5 นาที และ `timeout_listener` จะทำงานเพื่อ Broadcast สถานะ `AVAILABLE` กลับให้ทุกคนรับทราบพร้อมกัน
 
 ## 4. Redis Lock Strategy
 
@@ -73,7 +81,7 @@
 ## 5. Message Queue
 
 ระบบใช้ **RabbitMQ** เป็นศูนย์กลางในการสื่อสารเพื่อกระจาย Event โดยไม่ต้องพึ่งพา API หลัก (Decoupling) ประโยชน์หลัก 2 ข้อ:
-1. **Real-time Seat Updates:** เมื่อมีการ Lock, Confirm, หรือ Timeout สถานะเก้าอี้จะถูก Publish ลงคิว `seat_updates` และฝั่ง WebSocket จะ Consume ออกมากระจายให้ User ที่หน้าจอทันที ทำให้เห็นที่นั่งเด้งสลับสถานะแบบ Real-time 
+1. **Real-time Seat Updates (Hub Pattern):** เมื่อมีการ Lock, Unlock, Confirm หรือ Timeout สถานะเก้าอี้จะถูก Publish ลงคิว `seat_updates` โดยฝั่ง WebSocket จะมี Consumer กลาง (Hub) รับข้อความและทำการกระจาย (Fan-out) ไปให้ Client ทุกการเชื่อมต่อที่ดูรอบฉายเดียวกันพร้อมๆ กัน ทำให้เห็นที่นั่งเด้งสลับสถานะแบบ Real-time สมบูรณ์แบบ
 2. **Background Processing (Worker):** เมื่อยืนยันการจองสำเร็จ Worker จะมารับงานบันทึก Audit Logs ลง MongoDB และจำลองส่ง Email การันตีว่าข้อมูลจะไม่ตกหล่นแม้ยอดจองจะพุ่งสูง และช่วยให้ API ไม่โหลดหนักไปทำงานอื่น
 
 ## 6. Assumptions & Trade-offs
@@ -90,7 +98,17 @@ docker compose up --build
 ```
 ระบบ Backend จะรันอยู่ที่ `http://localhost:8080`
 
-## 8. Test Credentials
+**การตั้งค่า Frontend:**
+ก่อนเริ่มรัน Frontend กรุณาคัดลอกไฟล์ `golden-stage-cinema-client/.env.example` เป็น `.env` และกรอกค่า Firebase Configuration ให้ครบถ้วน จากนั้นใช้คำสั่ง:
+```bash
+cd golden-stage-cinema-client
+npm install
+npm run dev
+```
+
+## 8. Test Credentials & Authentication
+
+ระบบใช้ **Firebase Authentication** แบบ Client-side สำหรับผู้ตรวจระบบ (Examiners) สามารถใช้บัญชีที่เตรียมไว้ให้ด้านล่างนี้ล็อกอินเข้าใช้งานได้ทันทีครับ:
 
 **Admin Profile**
 * Email: `admingoldenstage@gmail.com`
@@ -99,6 +117,17 @@ docker compose up --build
 **User Profile**
 * Email: `mockuser01@gmail.com`
 * Password: `mockuser01`
+
+*(หรือสามารถทดลองสร้างบัญชีใหม่ได้เองผ่านเมนู Register บนหน้าเว็บเพื่อใช้งานในสิทธิ์ผู้ใช้ทั่วไป)*
+
+---
+
+**สำหรับนักพัฒนา (Developer Tools):**
+หากคุณเป็นผู้พัฒนาและต้องการให้สิทธิ์ Admin แก่บัญชีอื่นๆ เพิ่มเติม สามารถทำได้โดย:
+1. ไปที่หน้าเมนู Authentication ใน Firebase Console ของคุณเพื่อคัดลอก `UID`
+2. นำ `UID` ไปกำหนดในไฟล์ `golden-stage-cinema-server/.env` (ตัวแปร `ADMIN_UID=...`) 
+   หรือ รันคำสั่งพร้อมแนบ UID ต่อท้าย: `go run scripts/set_admin.go <UID>`
+ระบบจะทำการตั้งค่า Custom Claims (`role: "admin"`) ให้กับบัญชีนั้นทันที
 
 ## 9. API Reference
 
@@ -112,8 +141,9 @@ docker compose up --build
 **Secured Endpoints (ต้องแนบ Authorization: Bearer <Firebase_Token>)**
 * `GET /api/bookings/me` : ดึงประวัติการจองตั๋วของผู้ใช้งาน
 * `GET /api/showtimes/:showtime_id/seats` : ดึงผังที่นั่งและสถานะ (AVAILABLE, LOCKED, BOOKED)
-* `POST /api/bookings/lock` : ส่งคำสั่งล็อกที่นั่งลง Redis (TTL 5 นาที) ป้องกัน Double Booking
-* `POST /api/bookings/confirm` : ยืนยันการชำระเงิน บันทึกลง MongoDB และส่ง Event เข้า RabbitMQ
+* `POST /api/bookings/lock` : ส่งคำสั่งล็อกที่นั่งลง Redis (TTL 5 นาที) และส่ง Event LOCKED เข้า WebSocket
+* `DELETE /api/bookings/lock/:showtime_id/:seat_number` : สั่งปลดล็อกที่นั่งคืนระบบและส่ง Event AVAILABLE เข้า WebSocket
+* `POST /api/bookings/confirm` : ยืนยันการชำระเงิน บันทึกลง MongoDB และส่ง Event BOOKED เข้า RabbitMQ
 
 **Real-time Communication**
 * `WS /ws/seats/:showtime_id` : WebSocket สำหรับรับข้อมูลอัปเดตสถานะที่นั่งแบบ Real-time

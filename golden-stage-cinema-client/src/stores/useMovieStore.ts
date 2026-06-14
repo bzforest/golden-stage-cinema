@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '@/lib/axios'
+import { useAuthStore } from '@/stores/useAuthStore'
 
 export interface Movie {
   id: string
@@ -242,7 +243,9 @@ export const useMovieStore = defineStore('movie', () => {
     error.value = null
     seats.value = []
     try {
-      const response = await api.get(`/showtimes/${showtimeId}/seats`)
+      const authStore = useAuthStore()
+      const userId = authStore.user?.uid || ''
+      const response = await api.get(`/showtimes/${showtimeId}/seats?user_id=${userId}`)
       seats.value = response.data
     } catch (err: any) {
       console.error('Failed to fetch seats:', err)
@@ -252,10 +255,11 @@ export const useMovieStore = defineStore('movie', () => {
     }
   }
 
-  const updateSeatStatus = (seatNumber: string, status: 'AVAILABLE' | 'LOCKED' | 'RESERVED' | 'BOOKED') => {
-    const seat = seats.value.find(s => s.seat_number === seatNumber)
-    if (seat) {
-      seat.status = status
+  const updateSeatStatus = (seatNumber: string, status: 'AVAILABLE' | 'LOCKED' | 'SELECTED' | 'RESERVED' | 'BOOKED') => {
+    const index = seats.value.findIndex(s => s.seat_number === seatNumber)
+    if (index !== -1) {
+      // Re-assign object to trigger deep reactivity properly
+      seats.value[index] = { ...seats.value[index], status }
     }
   }
 

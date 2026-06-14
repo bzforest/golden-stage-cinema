@@ -2,8 +2,10 @@ package showtimes
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"golden-stage-cinema-server/config"
@@ -86,6 +88,8 @@ func GetShowtimesByMovie(c *gin.Context) {
 // GetSeatsByShowtime ดึงข้อมูลผังเก้าอี้และสถานะของแต่ละที่นั่งในรอบฉายหนึ่งๆ
 func GetSeatsByShowtime(c *gin.Context) {
 	showtimeIDStr := c.Param("showtime_id")
+	userID := c.Query("user_id") // รับ user_id จาก query params สำหรับเช็กว่าเราจองไว้เองไหม
+
 	if showtimeIDStr == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "showtime_id is required"})
 		return
@@ -101,7 +105,7 @@ func GetSeatsByShowtime(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// ค้นหาเก้าอี้ทั้งหมดที่เป็นของรอบฉาย (showtime_id) นี้
+	// 1. ค้นหาเก้าอี้ทั้งหมดที่เป็นของรอบฉาย (showtime_id) นี้ จาก MongoDB
 	cursor, err := collection.Find(ctx, bson.M{"showtime_id": showtimeID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch seats"})
@@ -120,6 +124,36 @@ func GetSeatsByShowtime(c *gin.Context) {
 	if len(seats) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No seats found for this showtime"})
 		return
+	}
+
+	// 2. ดึงสถานะการล็อก (LOCKED) จาก Redis เพื่อมา Merge กับข้อมูลใน Database
+	keys := make([]string, 0, len(seats))
+	for _, seat := range seats {
+		keys = append(keys, fmt.Sprintf("lock:seat:%s:%s", showtimeIDStr, seat.SeatNumber))
+	}
+
+	// MGet ดึงข้อมูลหลายๆ key พร้อมกันในครั้งเดียว
+	vals, err := config.RedisClient.MGet(ctx, keys...).Result()
+	if err == nil {
+		for i, val := range vals {
+			if val != nil { // มีข้อมูลล็อกใน Redis
+				lockerIDRaw := val.(string)
+				// Clean possible quotation marks / whitespace
+				lockerID := strings.TrimSpace(strings.Trim(lockerIDRaw, "\""))
+				userIDClean := strings.TrimSpace(strings.Trim(userID, "\""))
+				log.Printf("[GetSeats] seat %s lock owner: %s, requester: %s", seats[i].SeatNumber, lockerID, userIDClean)
+				// เปลี่ยนสถานะเฉพาะเก้าอี้ที่ยังไม่มีคนซื้อ (AVAILABLE)
+				if seats[i].Status == "AVAILABLE" {
+					if lockerID == userIDClean && userIDClean != "" {
+						seats[i].Status = "SELECTED" // ล็อกโดยตัวเราเอง
+					} else {
+						seats[i].Status = "LOCKED"   // ล็อกโดยคนอื่น
+					}
+				}
+			}
+		}
+	} else {
+		log.Printf("Redis MGet error: %v", err)
 	}
 
 	c.JSON(http.StatusOK, seats)
