@@ -116,7 +116,7 @@ const formatTime = (dateString: string) => {
               </div>
             </div>
           </div>
-          <Button variant="outline" @click="handleLogout" class="hidden md:flex gap-2 text-muted-foreground hover:text-red-500 hover:border-red-500 hover:bg-red-500/10 transition-colors">
+          <Button variant="outline" @click="handleLogout" class="hidden md:flex gap-2 text-muted-foreground hover:text-red-500 hover:border-red-500 hover:bg-red-500/10 transition-colors cursor-pointer">
             <LogOutIcon class="w-4 h-4" />
             Sign Out
           </Button>
