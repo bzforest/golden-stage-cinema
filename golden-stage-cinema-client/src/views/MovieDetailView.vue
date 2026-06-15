@@ -156,7 +156,7 @@ const handleShowtimeClick = (showtimeId: string) => {
     <main class="flex-1 relative z-10 py-10 px-6">
       <div class="max-w-6xl mx-auto">
         <!-- Back Button -->
-        <button @click="router.back()" class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-border/50 bg-card/40 backdrop-blur-sm hover:bg-card hover:border-primary/50 transition-colors mb-8 text-sm font-medium">
+        <button @click="router.back()" class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-border/50 bg-card/40 backdrop-blur-sm hover:bg-card hover:border-primary/50 transition-colors mb-8 text-sm font-medium cursor-pointer">
           <ArrowLeftIcon class="w-4 h-4" /> Back
         </button>
 

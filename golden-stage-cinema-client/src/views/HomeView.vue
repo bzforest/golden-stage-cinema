@@ -111,7 +111,7 @@ const handleBookClick = (movie: Movie) => {
 
             <!-- Buttons -->
             <div class="flex items-center gap-4">
-              <Button size="lg" class="px-8 h-12 rounded-full font-semibold text-primary-foreground bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 hover:scale-105 transition-transform" @click="handleBookClick(heroMovie)">
+              <Button size="lg" class="px-8 h-12 rounded-full font-semibold text-primary-foreground bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 hover:scale-105 transition-transform cursor-pointer" @click="handleBookClick(heroMovie)">
                 Book Tickets
               </Button>
               <Button size="lg" variant="secondary" class="px-8 h-12 rounded-full font-semibold bg-secondary/80 text-foreground backdrop-blur-md hover:bg-secondary border border-border/50 hover:scale-105 transition-transform cursor-pointer">
@@ -131,7 +131,7 @@ const handleBookClick = (movie: Movie) => {
             <div class="w-1.5 h-7 bg-primary rounded-sm shadow-[0_0_10px_rgba(var(--primary),0.5)]"></div>
             <h2 class="text-2xl md:text-3xl font-bold text-heading text-white">Trending Movies</h2>
           </div>
-          <a href="#" class="text-sm font-semibold text-primary hover:text-primary/80 transition-colors">View All</a>
+          <router-link :to="{ name: 'movies' }" class="text-sm font-semibold text-primary hover:text-primary/80 transition-colors">View All</router-link>
         </div>
 
         <!-- Loading Skeleton Grid -->
