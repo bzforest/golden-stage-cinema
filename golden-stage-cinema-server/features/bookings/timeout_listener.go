@@ -59,9 +59,11 @@ func StartRedisTimeoutListener() {
 					detailsBytes, _ := json.Marshal(details)
 
 					auditLog := AuditLog{
-						Action:    "BOOKING_TIMEOUT",
-						Details:   string(detailsBytes),
-						Timestamp: time.Now(),
+						Action:     "BOOKING_TIMEOUT",
+						Details:    string(detailsBytes),
+						Timestamp:  time.Now(),
+						ShowtimeID: sID,
+						SeatNumber: seat,
 					}
 					
 					_, err := collection.InsertOne(logCtx, auditLog)

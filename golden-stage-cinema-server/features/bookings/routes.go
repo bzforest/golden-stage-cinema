@@ -18,10 +18,11 @@ func BookingRoutes(router *gin.Engine) {
 	}
 
 	// จัดกลุ่ม Route สำหรับ Admin
-	adminGroup := router.Group("/api/admin/bookings")
+	adminGroup := router.Group("/api/admin")
 	adminGroup.Use(middlewares.FirebaseAuthMiddleware())
 	adminGroup.Use(middlewares.AdminRequired())
 	{
-		adminGroup.GET("", GetAdminBookings)
+		adminGroup.GET("/bookings", GetAdminBookings)
+		adminGroup.GET("/logs", GetAdminLogs)
 	}
 }

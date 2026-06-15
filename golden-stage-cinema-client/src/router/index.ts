@@ -49,6 +49,18 @@ const router = createRouter({
       component: () => import('@/views/LoginView.vue'),
       meta: { requiresGuest: true }
     },
+    {
+      path: '/profile',
+      name: 'profile',
+      component: () => import('@/views/ProfileView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/admin',
+      name: 'admin-dashboard',
+      component: () => import('@/views/AdminDashboardView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
   ],
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
@@ -65,6 +77,8 @@ router.beforeEach(async (to, from, next) => {
 
   if (to.meta.requiresAuth && !authStore.user) {
     next({ path: '/login', query: { redirect: to.fullPath } })
+  } else if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    next({ path: '/' })
   } else if (to.meta.requiresGuest && authStore.user) {
     next({ path: '/' })
   } else {

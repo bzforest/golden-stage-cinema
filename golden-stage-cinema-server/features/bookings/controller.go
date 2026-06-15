@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"firebase.google.com/go/auth"
 	"golden-stage-cinema-server/config"
 
 	"github.com/gin-gonic/gin"
@@ -17,12 +20,66 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type LockSeatRequest struct {
 	ShowtimeID string `json:"showtime_id" binding:"required"`
 	SeatNumber string `json:"seat_number" binding:"required"`
 	// เอา UserID ออกจาก JSON Request ป้องกันคนส่งมาปลอมแปลง
+}
+
+// CachedUser เก็บข้อมูลผู้ใช้งานแบบย่อสำหรับส่งออก
+type CachedUser struct {
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+}
+
+// batchFetchUsersCached ดึงข้อมูลจาก Redis ก่อน หากไม่พบจึงจะดึงจาก Firebase
+func batchFetchUsersCached(ctx context.Context, uids []string) map[string]CachedUser {
+	userMap := make(map[string]CachedUser)
+	if len(uids) == 0 {
+		return userMap
+	}
+
+	var missingIdentifiers []auth.UserIdentifier
+
+	// 1. ตรวจสอบ Redis Cache ทีละรายการ (สามารถประยุกต์ใช้ MGET ได้ในอนาคตเพื่อความเร็วสูงสุด)
+	for _, uid := range uids {
+		if uid == "" {
+			continue
+		}
+		cacheKey := "firebase_user:" + uid
+		val, err := config.RedisClient.Get(ctx, cacheKey).Result()
+		if err == nil && val != "" {
+			var cachedUser CachedUser
+			if err := json.Unmarshal([]byte(val), &cachedUser); err == nil {
+				userMap[uid] = cachedUser
+				continue
+			}
+		}
+		missingIdentifiers = append(missingIdentifiers, auth.UIDIdentifier{UID: uid})
+	}
+
+	// 2. ดึงข้อมูลส่วนที่หายไปจาก Firebase ทีเดียว (Batch)
+	if len(missingIdentifiers) > 0 {
+		getUsersResult, err := config.FirebaseAuth.GetUsers(ctx, missingIdentifiers)
+		if err == nil {
+			for _, u := range getUsersResult.Users {
+				cu := CachedUser{
+					Email:       u.Email,
+					DisplayName: u.DisplayName,
+				}
+				userMap[u.UID] = cu
+
+				// 3. จัดเก็บลง Redis Cache (ตั้งเวลาหมดอายุ 24 ชั่วโมง)
+				cacheBytes, _ := json.Marshal(cu)
+				config.RedisClient.Set(ctx, "firebase_user:"+u.UID, string(cacheBytes), 24*time.Hour)
+			}
+		}
+	}
+
+	return userMap
 }
 
 // LockSeat ฟังก์ชันสำหรับจองและล็อกที่นั่ง
@@ -74,6 +131,16 @@ func LockSeat(c *gin.Context) {
 		config.RabbitChannel.PublishWithContext(ctx, "seat_updates_ex", "", false, false, amqp.Publishing{
 			ContentType: "application/json",
 			Body:        messageBody,
+		})
+
+		auditCollection := config.GetCollection("audit_logs")
+		auditCollection.InsertOne(ctx, AuditLog{
+			Action:     "SEAT_LOCKED",
+			Details:    fmt.Sprintf("User %s locked seat %s for showtime %s", userID, req.SeatNumber, req.ShowtimeID),
+			Timestamp:  time.Now(),
+			UID:        userID,
+			ShowtimeID: req.ShowtimeID,
+			SeatNumber: req.SeatNumber,
 		})
 
 		c.JSON(http.StatusOK, gin.H{"message": "Seat locked successfully"})
@@ -246,6 +313,16 @@ func ConfirmBooking(c *gin.Context) {
 			})
 	}
 
+	auditCollection := config.GetCollection("audit_logs")
+	auditCollection.InsertOne(ctx, AuditLog{
+		Action:     "BOOKING_CONFIRMED",
+		Details:    fmt.Sprintf("User %s confirmed booking for showtime %s (Seats: %v)", userID, req.ShowtimeID, req.SeatNumbers),
+		Timestamp:  time.Now(),
+		UID:        userID,
+		ShowtimeID: req.ShowtimeID,
+		SeatNumber: strings.Join(req.SeatNumbers, ","),
+	})
+
 	// ตอบกลับ 200 OK
 	c.JSON(http.StatusOK, gin.H{"message": "Bookings confirmed and messages queued"})
 }
@@ -259,80 +336,185 @@ func GetUserBookings(c *gin.Context) {
 
 	collection := config.GetCollection("bookings")
 
-	cursor, err := collection.Find(ctx, bson.M{"user_id": userID})
+	// ใช้ Aggregate Pipeline เพื่อ Join กับ showtimes และ movies
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$match", Value: bson.M{"user_id": userID}}},
+		bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "showtimes"},
+			{Key: "localField", Value: "showtime_id"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "showtime"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{
+			{Key: "path", Value: "$showtime"},
+			{Key: "preserveNullAndEmptyArrays", Value: true},
+		}}},
+		bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "movies"},
+			{Key: "localField", Value: "showtime.movie_id"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "movie"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{
+			{Key: "path", Value: "$movie"},
+			{Key: "preserveNullAndEmptyArrays", Value: true},
+		}}},
+        bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "cinemas"},
+			{Key: "localField", Value: "showtime.cinema_id"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "cinema"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{
+			{Key: "path", Value: "$cinema"},
+			{Key: "preserveNullAndEmptyArrays", Value: true},
+		}}},
+        bson.D{{Key: "$sort", Value: bson.M{"created_at": -1}}},
+	}
+
+	cursor, err := collection.Aggregate(ctx, pipeline)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch bookings"})
 		return
 	}
 	defer cursor.Close(ctx)
 
-	var bookings []Booking
+	var bookings []bson.M
 	if err = cursor.All(ctx, &bookings); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode bookings"})
 		return
 	}
 
 	if bookings == nil {
-		bookings = []Booking{}
+		bookings = []bson.M{}
 	}
 
 	c.JSON(http.StatusOK, bookings)
 }
 
-// GetAdminBookings ดึงประวัติการจองทั้งหมดสำหรับผู้ดูแลระบบ พร้อมรองรับการ Filter
+// GetAdminBookings ดึงประวัติการจองทั้งหมดสำหรับผู้ดูแลระบบ พร้อมรองรับการ Filter แบบ Server-side
 func GetAdminBookings(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	movieIDStr := c.Query("movie_id")
+	searchStr := c.Query("search")
 	dateStr := c.Query("date")
+	pageStr := c.Query("page")
+	limitStr := c.Query("limit")
+
+	page := 1
+	limit := 10
+	if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+		page = p
+	}
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		limit = l
+	}
 
 	collection := config.GetCollection("bookings")
 
 	// ใช้ Aggregate Pipeline เพื่อ Join กับ showtimes
 	pipeline := mongo.Pipeline{}
 
-	// 1. $lookup โยงตาราง showtimes เพื่อให้รู้ว่า booking นี้เป็นของหนังเรื่องอะไร
-	pipeline = append(pipeline, bson.D{{Key: "$lookup", Value: bson.D{
-		{Key: "from", Value: "showtimes"},
-		{Key: "localField", Value: "showtime_id"},
-		{Key: "foreignField", Value: "_id"},
-		{Key: "as", Value: "showtime_info"},
-	}}})
+	// 1. $lookup โยงตาราง showtimes, movies, cinemas
+	pipeline = append(pipeline,
+		bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "showtimes"},
+			{Key: "localField", Value: "showtime_id"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "showtime"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{
+			{Key: "path", Value: "$showtime"},
+			{Key: "preserveNullAndEmptyArrays", Value: true},
+		}}},
+		bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "movies"},
+			{Key: "localField", Value: "showtime.movie_id"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "movie"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{
+			{Key: "path", Value: "$movie"},
+			{Key: "preserveNullAndEmptyArrays", Value: true},
+		}}},
+		bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "cinemas"},
+			{Key: "localField", Value: "showtime.cinema_id"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "cinema"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{
+			{Key: "path", Value: "$cinema"},
+			{Key: "preserveNullAndEmptyArrays", Value: true},
+		}}},
+	)
 
-	// 2. สร้าง Filter ($match)
+	// 2. สร้าง Filter ($match) โดยไม่ต้องพึ่งพา $addFields
 	matchFilter := bson.M{}
 
-	if movieIDStr != "" {
-		if objID, err := primitive.ObjectIDFromHex(movieIDStr); err == nil {
-			matchFilter["showtime_info.movie_id"] = objID
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid movie_id format"})
-			return
+	// การค้นหาด้วยวันที่แบบเจาะจง
+	if dateStr != "" {
+		if t, err := time.Parse("2006-01-02", dateStr); err == nil {
+			nextDay := t.Add(24 * time.Hour)
+			matchFilter["created_at"] = bson.M{"$gte": t, "$lt": nextDay}
 		}
 	}
 
-	if dateStr != "" {
-		if parsedDate, err := time.Parse("2006-01-02", dateStr); err == nil {
-			nextDay := parsedDate.AddDate(0, 0, 1)
-			matchFilter["created_at"] = bson.M{
-				"$gte": parsedDate,
-				"$lt":  nextDay,
-			}
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format, expected YYYY-MM-DD"})
-			return
+	if searchStr != "" {
+		cleanSearchStr := strings.TrimSpace(strings.TrimPrefix(searchStr, "#"))
+		orConditions := []bson.M{}
+
+		// เงื่อนไข 1: ค้นหาด้วย ObjectID (ถ้า Parse ผ่าน)
+		if objID, err := primitive.ObjectIDFromHex(cleanSearchStr); err == nil {
+			orConditions = append(orConditions, bson.M{"_id": objID})
 		}
+
+		// เงื่อนไข 2: Regex ในฟิลด์ที่เหมาะสม
+		orConditions = append(orConditions, bson.M{"movie.title": bson.M{"$regex": cleanSearchStr, "$options": "i"}})
+
+		// หา UIDs จาก Firebase (ถ้าตรงกับ SearchStr) // ยังต้อง Fetch Users อยู่แต่จะดึงแบบจำกัด
+		// หมายเหตุ: การ Search จาก Firebase ทุกตัวยังหลีกเลี่ยงไม่ได้ 100% ถ้าไม่ซิงค์ลง MongoDB 
+		// แต่อย่างน้อยก็ทำแค่ตอน Search
+		var matchingUIDs []string
+		iter := config.FirebaseAuth.Users(ctx, "")
+		for {
+			u, err := iter.Next()
+			if err != nil {
+				break
+			}
+			if strings.Contains(strings.ToLower(u.Email), strings.ToLower(cleanSearchStr)) ||
+				strings.Contains(strings.ToLower(u.DisplayName), strings.ToLower(cleanSearchStr)) {
+				matchingUIDs = append(matchingUIDs, u.UID)
+			}
+		}
+
+		if len(matchingUIDs) > 0 {
+			orConditions = append(orConditions, bson.M{"user_id": bson.M{"$in": matchingUIDs}})
+		}
+
+		matchFilter["$or"] = orConditions
 	}
 
 	if len(matchFilter) > 0 {
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilter}})
 	}
 
-	// 3. $project เพื่อลบ showtime_info ออกจากผลลัพธ์สุดท้ายให้ตรงกับโครงสร้าง Booking เดิม
-	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
-		{Key: "showtime_info", Value: 0},
-	}}})
+	// 3. Count Total ก่อน Skip/Limit
+	countPipeline := append(pipeline, bson.D{{Key: "$count", Value: "total"}})
+	countCursor, err := collection.Aggregate(ctx, countPipeline)
+	total := 0
+	if err == nil {
+		var countResult []bson.M
+		if err = countCursor.All(ctx, &countResult); err == nil && len(countResult) > 0 {
+			total = int(countResult[0]["total"].(int32))
+		}
+	}
+
+	// 4. Sort, Skip, Limit
+	pipeline = append(pipeline, bson.D{{Key: "$sort", Value: bson.M{"created_at": -1}}})
+	pipeline = append(pipeline, bson.D{{Key: "$skip", Value: (page - 1) * limit}})
+	pipeline = append(pipeline, bson.D{{Key: "$limit", Value: limit}})
 
 	cursor, err := collection.Aggregate(ctx, pipeline)
 	if err != nil {
@@ -341,15 +523,263 @@ func GetAdminBookings(c *gin.Context) {
 	}
 	defer cursor.Close(ctx)
 
-	var bookings []Booking
+	var bookings []bson.M
 	if err = cursor.All(ctx, &bookings); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode admin bookings"})
 		return
 	}
 
 	if bookings == nil {
-		bookings = []Booking{}
+		bookings = []bson.M{}
+	} else {
+		// 5. Batch Fetch Users from Firebase with Redis Cache
+		var userIDs []string
+		uniqueUIDs := make(map[string]bool)
+		for _, b := range bookings {
+			if uid, ok := b["user_id"].(string); ok && uid != "" && !uniqueUIDs[uid] {
+				uniqueUIDs[uid] = true
+				userIDs = append(userIDs, uid)
+			}
+		}
+
+		userMap := batchFetchUsersCached(ctx, userIDs)
+
+		for _, b := range bookings {
+			if uid, ok := b["user_id"].(string); ok && uid != "" {
+				if u, exists := userMap[uid]; exists {
+					b["user_email"] = u.Email
+					b["user_name"] = u.DisplayName
+				} else {
+					b["user_email"] = "Unknown"
+					b["user_name"] = "Unknown"
+				}
+			}
+		}
 	}
 
-	c.JSON(http.StatusOK, bookings)
+	c.JSON(http.StatusOK, gin.H{
+		"data":  bookings,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// GetAdminLogs ดึงข้อมูล Audit Logs ทั้งหมดพร้อมระบบค้นหาและ Enrich Data
+func GetAdminLogs(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pageStr := c.Query("page")
+	limitStr := c.Query("limit")
+	searchStr := c.Query("search")
+
+	page := 1
+	limit := 10
+	if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+		page = p
+	}
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		limit = l
+	}
+
+	collection := config.GetCollection("audit_logs")
+
+	// 1. สร้าง Filter สำหรับ Search
+	matchFilter := bson.M{}
+	if searchStr != "" {
+		matchFilter["$or"] = []bson.M{
+			{"action": bson.M{"$regex": searchStr, "$options": "i"}},
+			{"details": bson.M{"$regex": searchStr, "$options": "i"}},
+		}
+	}
+
+	total, _ := collection.CountDocuments(ctx, matchFilter)
+
+	findOptions := options.Find()
+	findOptions.SetSort(bson.D{{Key: "timestamp", Value: -1}})
+	findOptions.SetSkip(int64((page - 1) * limit))
+	findOptions.SetLimit(int64(limit))
+
+	cursor, err := collection.Find(ctx, matchFilter, findOptions)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch logs"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var logs []AuditLog
+	if err = cursor.All(ctx, &logs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode logs"})
+		return
+	}
+	if logs == nil {
+		logs = []AuditLog{}
+	}
+
+	// 2. Enrich Data (ดึงชื่อ User, ชื่อภาพยนตร์, เวลาฉาย)
+	type EnrichedLog struct {
+		ID            string    `json:"id"`
+		Action        string    `json:"action"`
+		Details       string    `json:"details"`
+		Timestamp     time.Time `json:"timestamp"`
+		UserEmail     string    `json:"user_email,omitempty"`
+		UserName      string    `json:"user_name,omitempty"`
+		SeatNumber    string    `json:"seat_number,omitempty"`
+		MovieTitle    string    `json:"movie_title,omitempty"`
+		ShowtimeDate  string    `json:"showtime_date,omitempty"`
+		UID           string    `json:"uid,omitempty"`
+		ShowtimeIDStr string    `json:"showtime_id,omitempty"`
+		RawJSON       bool      `json:"raw_json"`
+	}
+
+	var enrichedLogs []EnrichedLog
+
+	// Regex for parsing Details string
+	lockRegex := regexp.MustCompile(`User (.*) locked seat (.*) for showtime (.*)`)
+	confirmRegexAlt := regexp.MustCompile(`User (.*) confirmed booking for showtime (.*) \(Seats: (.*)\)`)
+
+	// Sets สำหรับ Batch Processing
+	uniqueUIDs := make(map[string]bool)
+	uniqueShowtimeIDs := make(map[string]bool)
+
+	// Step 1: Parse Regex และรวบรวม IDs
+	for _, log := range logs {
+		eLog := EnrichedLog{
+			ID:        log.ID.Hex(),
+			Action:    log.Action,
+			Details:   log.Details,
+			Timestamp: log.Timestamp,
+			RawJSON:   false,
+		}
+
+		// อ่านค่าจาก Struct ทันทีโดยไม่ต้องใช้ Regex (อ้างอิงจาก Struct ใหม่)
+		uid := log.UID
+		showtimeID := log.ShowtimeID
+		seatNum := log.SeatNumber
+
+		// หากค่าว่างแปลว่าเป็น Log เก่า ให้ใช้ Regex งัดข้อมูลเหมือนเดิม
+		if uid == "" || showtimeID == "" {
+			var jsonDetails map[string]interface{}
+			if err := json.Unmarshal([]byte(log.Details), &jsonDetails); err == nil && len(jsonDetails) > 0 {
+				eLog.RawJSON = true
+				if sn, ok := jsonDetails["seat_number"].(string); ok {
+					seatNum = sn
+				}
+				if stID, ok := jsonDetails["showtime_id"].(string); ok {
+					showtimeID = stID
+				}
+			} else {
+				if matches := lockRegex.FindStringSubmatch(log.Details); len(matches) == 4 {
+					uid = matches[1]
+					seatNum = matches[2]
+					showtimeID = matches[3]
+				} else if matches := confirmRegexAlt.FindStringSubmatch(log.Details); len(matches) == 4 {
+					uid = matches[1]
+					showtimeID = matches[2]
+					seatNum = matches[3]
+				}
+			}
+		} else {
+			// ตรวจสอบว่าเก็บ JSON ไหม (ถ้า Details เป็น JSON จะได้เซต RawJSON = true)
+			if strings.HasPrefix(strings.TrimSpace(log.Details), "{") {
+				eLog.RawJSON = true
+			}
+		}
+
+		eLog.UID = uid
+		eLog.ShowtimeIDStr = showtimeID
+		eLog.SeatNumber = seatNum
+		
+		if uid != "" {
+			uniqueUIDs[uid] = true
+		}
+		if showtimeID != "" {
+			uniqueShowtimeIDs[showtimeID] = true
+		}
+
+		enrichedLogs = append(enrichedLogs, eLog)
+	}
+
+	// Step 2: Batch Fetch Firebase Users with Redis Cache
+	var userIDs []string
+	for uid := range uniqueUIDs {
+		userIDs = append(userIDs, uid)
+	}
+	userMap := batchFetchUsersCached(ctx, userIDs)
+
+	// Step 3: Batch Fetch MongoDB Showtimes and Movies
+	var stObjIDs []primitive.ObjectID
+	for stID := range uniqueShowtimeIDs {
+		if objID, err := primitive.ObjectIDFromHex(stID); err == nil {
+			stObjIDs = append(stObjIDs, objID)
+		}
+	}
+
+	showtimeMap := make(map[string]bson.M)
+	var movieObjIDs []primitive.ObjectID
+	uniqueMovieIDs := make(map[primitive.ObjectID]bool)
+
+	if len(stObjIDs) > 0 {
+		stCursor, err := config.GetCollection("showtimes").Find(ctx, bson.M{"_id": bson.M{"$in": stObjIDs}})
+		if err == nil {
+			var sts []bson.M
+			stCursor.All(ctx, &sts)
+			for _, st := range sts {
+				stIDStr := st["_id"].(primitive.ObjectID).Hex()
+				showtimeMap[stIDStr] = st
+				if mvID, ok := st["movie_id"].(primitive.ObjectID); ok {
+					if !uniqueMovieIDs[mvID] {
+						uniqueMovieIDs[mvID] = true
+						movieObjIDs = append(movieObjIDs, mvID)
+					}
+				}
+			}
+		}
+	}
+
+	movieMap := make(map[primitive.ObjectID]string)
+	if len(movieObjIDs) > 0 {
+		mvCursor, err := config.GetCollection("movies").Find(ctx, bson.M{"_id": bson.M{"$in": movieObjIDs}})
+		if err == nil {
+			var mvs []bson.M
+			mvCursor.All(ctx, &mvs)
+			for _, mv := range mvs {
+				mvID := mv["_id"].(primitive.ObjectID)
+				if title, ok := mv["title"].(string); ok {
+					movieMap[mvID] = title
+				}
+			}
+		}
+	}
+
+	// Step 4: Map back to EnrichedLogs
+	for i, eLog := range enrichedLogs {
+		if eLog.UID != "" {
+			if u, exists := userMap[eLog.UID]; exists {
+				enrichedLogs[i].UserEmail = u.Email
+				enrichedLogs[i].UserName = u.DisplayName
+			}
+		}
+		
+		if eLog.ShowtimeIDStr != "" {
+			if st, exists := showtimeMap[eLog.ShowtimeIDStr]; exists {
+				if startTime, ok := st["start_time"].(primitive.DateTime); ok {
+					enrichedLogs[i].ShowtimeDate = startTime.Time().Format("2006-01-02 15:04:05")
+				}
+				if mvID, ok := st["movie_id"].(primitive.ObjectID); ok {
+					if title, exists := movieMap[mvID]; exists {
+						enrichedLogs[i].MovieTitle = title
+					}
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  enrichedLogs,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
 }

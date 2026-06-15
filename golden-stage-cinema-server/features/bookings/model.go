@@ -23,8 +23,11 @@ type Booking struct {
 
 // AuditLog คือ Struct สำหรับเก็บประวัติเหตุการณ์สำคัญในระบบ
 type AuditLog struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Action    string             `bson:"action" json:"action"`
-	Details   string             `bson:"details" json:"details"`
-	Timestamp time.Time          `bson:"timestamp" json:"timestamp"`
+	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Action     string             `bson:"action" json:"action"`
+	Details    string             `bson:"details" json:"details"`
+	Timestamp  time.Time          `bson:"timestamp" json:"timestamp"`
+	UID        string             `bson:"uid,omitempty" json:"uid,omitempty"`
+	ShowtimeID string             `bson:"showtime_id,omitempty" json:"showtime_id,omitempty"`
+	SeatNumber string             `bson:"seat_number,omitempty" json:"seat_number,omitempty"`
 }

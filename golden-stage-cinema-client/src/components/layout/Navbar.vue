@@ -53,15 +53,12 @@ const handleLogout = async () => {
       <div class="flex items-center justify-end gap-3 md:w-1/3">
         <template v-if="!authStore.isLoading">
           <template v-if="authStore.user">
-            <span class="text-xs text-muted-foreground hidden sm:inline-block border border-border/50 px-2 py-1 rounded-full bg-muted/20">
-              {{ authStore.user.displayName || authStore.user.email }}
-            </span>
             <button 
-              @click="handleLogout"
-              title="Sign Out"
-              class="w-9 h-9 rounded-full flex items-center justify-center hover:bg-red-900/20 hover:text-red-500 transition-colors text-muted-foreground"
+              @click="router.push('/profile')"
+              title="Profile"
+              class="w-10 h-10 rounded-full border border-transparent bg-transparent flex items-center justify-center hover:bg-secondary hover:border-border transition-colors text-muted-foreground cursor-pointer"
             >
-              <LogOutIcon class="w-4 h-4 cursor-pointer" />
+              <UserIcon class="w-5 h-5" />
             </button>
           </template>
           <template v-else>
