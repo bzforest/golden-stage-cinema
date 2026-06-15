@@ -128,6 +128,17 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* ซ่อน Scrollbar ทั่วทั้งเว็บ แต่ยังเลื่อนได้ปกติ */
+  *,
+  *::before,
+  *::after {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE / Edge */
+  }
+  *::-webkit-scrollbar {
+    display: none; /* Chrome / Safari / Opera */
+  }
 }
 
 @utility text-heading {

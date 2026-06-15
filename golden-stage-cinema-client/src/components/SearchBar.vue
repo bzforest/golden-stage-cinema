@@ -38,7 +38,6 @@ const handleClickOutside = (event: MouseEvent) => {
 const handleSearch = () => {
   emit('search', query.value)
   if (searchResults.value.length > 0) {
-    // Optionally navigate to the first result or a dedicated search page
   }
 }
 
@@ -48,11 +47,11 @@ const searchResults = computed(() => {
   return movieStore.movies.filter(movie => 
     movie.title.toLowerCase().includes(lowerQuery) || 
     movie.genre.toLowerCase().includes(lowerQuery)
-  ).slice(0, 5) // Limit to 5 results
+  ).slice(0, 5)
 })
 
 const navigateToMovie = (id: string) => {
-  query.value = '' // Clear search
+  query.value = ''
   isFocused.value = false
   router.push(`/movie/${id}`)
 }

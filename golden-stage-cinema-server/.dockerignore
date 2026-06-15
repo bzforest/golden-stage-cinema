@@ -1,0 +1,14 @@
+# Binaries
+*.exe
+
+# Temp files
+tmp/
+bin/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

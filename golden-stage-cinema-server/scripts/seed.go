@@ -44,6 +44,13 @@ func main() {
 
 	db := client.Database(dbName)
 
+	// เช็กว่ามีข้อมูลหนังอยู่แล้วหรือไม่
+	count, err := db.Collection("movies").CountDocuments(ctx, bson.M{})
+	if err == nil && count > 0 && os.Getenv("FORCE_SEED") != "true" {
+		log.Println("Database already seeded. Skipping seed process. (Set FORCE_SEED=true to force reset)")
+		return
+	}
+
 	log.Println("--- 1. ล้างข้อมูลเก่า (Dropping old collections) ---")
 	db.Collection("movies").Drop(ctx)
 	db.Collection("cinemas").Drop(ctx)

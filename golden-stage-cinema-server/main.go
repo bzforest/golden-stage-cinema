@@ -50,9 +50,13 @@ func main() {
 	// สร้าง Gin Router
 	r := gin.Default()
 
-	// ตั้งค่า CORS Middleware
+	// ตั้งค่า CORS Middleware (อ่าน Origin จาก ENV เพื่อรองรับทั้ง Dev และ Docker)
+	corsOrigin := os.Getenv("CORS_ORIGIN")
+	if corsOrigin == "" {
+		corsOrigin = "http://localhost:5173"
+	}
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowOrigins:     []string{corsOrigin},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},

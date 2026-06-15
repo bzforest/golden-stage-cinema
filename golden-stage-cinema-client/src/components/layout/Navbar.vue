@@ -25,7 +25,6 @@ const handleLogout = async () => {
       <!-- Left: Logo -->
       <div class="flex items-center gap-2 md:w-1/3 cursor-pointer" @click="$router.push('/')">
         <div class="w-8 h-8 flex items-center justify-center">
-          <!-- Using a clapperboard or ticket icon like the reference if possible, but the current logo works -->
           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19.82 2H4.18C2.97 2 2 2.97 2 4.18v15.64C2 21.03 2.97 22 4.18 22h15.64c1.21 0 2.18-.97 2.18-2.18V4.18C22 2.97 21.03 2 19.82 2Z"/>
             <path d="M7 2v20"/>

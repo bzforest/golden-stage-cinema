@@ -103,20 +103,30 @@
 
 ## 7. วิธีรันระบบ
 
-ระบบได้ถูกตั้งค่า Docker Container ไว้เรียบร้อยแล้ว รันคำสั่งเดียวระบบจะผูก MongoDB, Redis, RabbitMQ และ Go Backend เข้าด้วยกัน:
+ระบบทั้งหมดได้ถูกตั้งค่า Docker Container ไว้เรียบร้อยแล้ว (ทั้ง Backend, Frontend และ Infrastructure) สามารถรันทั้งระบบได้ด้วยคำสั่งเดียว:
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
-ระบบ Backend จะรันอยู่ที่ `http://localhost:8080`
 
-**การตั้งค่า Frontend:**
-ก่อนเริ่มรัน Frontend กรุณาคัดลอกไฟล์ `golden-stage-cinema-client/.env.example` เป็น `.env` และกรอกค่า Firebase Configuration ให้ครบถ้วน จากนั้นใช้คำสั่ง:
-```bash
-cd golden-stage-cinema-client
-npm install
-npm run dev
-```
+*(หมายเหตุ: ระบบมีฟังก์ชัน **Auto-Seeding** ในตัว หากรันครั้งแรกและพบว่าฐานข้อมูลว่างเปล่า ระบบจะทำการ Seed ข้อมูลหนังและรอบฉายให้โดยอัตโนมัติ ทำให้พร้อมใช้งานทันทีด้วยคำสั่งเดียวจริงๆ ครับ)*
+
+| Service | URL | รายละเอียด |
+|---|---|---|
+| **Frontend (Vue + Nginx)** | `http://localhost:5173` | หน้าเว็บหลักสำหรับผู้ใช้งาน |
+| **Backend API (Go + Gin)** | `http://localhost:8080` | RESTful API + WebSocket |
+| **RabbitMQ Management** | `http://localhost:15672` | Dashboard จัดการ Message Queue (guest/guest) |
+
+**Docker Architecture:**
+- ใช้ **Multi-stage Build** ทั้ง Backend (Go → Alpine) และ Frontend (Node → Nginx) เพื่อให้ Image มีขนาดเล็กและปลอดภัย
+- Backend จะรอ RabbitMQ พร้อมใช้งาน (Healthcheck) ก่อนเริ่มทำงาน ป้องกันปัญหา Connection Error
+- MongoDB ใช้ Named Volume (`mongo_data`) เพื่อเก็บข้อมูลไม่ให้หายเมื่อ Restart Container
+
+**การรันแบบ Development (ไม่ใช้ Docker):**
+หากต้องการรันแบบ Development เพื่อแก้ไขโค้ดและเห็นการเปลี่ยนแปลงทันที:
+1. รัน Infrastructure ด้วย Docker: เปิดเฉพาะ MongoDB, Redis, RabbitMQ โดยใช้คำสั่ง `docker compose up mongo_db redis_cache rabbitmq_queue`
+2. รัน Backend: `cd golden-stage-cinema-server && go run main.go`
+3. รัน Frontend: คัดลอกไฟล์ `golden-stage-cinema-client/.env.example` เป็น `.env` กรอกค่า Firebase Configuration แล้วใช้คำสั่ง `cd golden-stage-cinema-client && npm install && npm run dev`
 
 ## 8. Test Credentials & Authentication
 
