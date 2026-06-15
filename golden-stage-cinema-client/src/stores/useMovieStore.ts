@@ -260,7 +260,7 @@ export const useMovieStore = defineStore('movie', () => {
     const index = seats.value.findIndex(s => s.seat_number === seatNumber)
     if (index !== -1) {
       // Re-assign object to trigger deep reactivity properly
-      seats.value[index] = { ...seats.value[index], status }
+      seats.value[index] = { ...seats.value[index], status: status as string } as any
     }
   }
 

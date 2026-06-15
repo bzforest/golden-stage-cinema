@@ -4,6 +4,7 @@
 # Go
 /golden-stage-cinema-server/tmp/
 /golden-stage-cinema-server/bin/
+*.exe
 
 # Node / Vue
 node_modules/

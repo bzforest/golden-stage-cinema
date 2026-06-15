@@ -55,9 +55,12 @@ func StartBookingWorker() {
 
 			// บันทึก Audit Log ลง MongoDB
 			auditLog := AuditLog{
-				Action:    "BOOKING_CONFIRMED",
-				Details:   string(msg.Body),
-				Timestamp: time.Now(),
+				Action:     "BOOKING_CONFIRMED",
+				Details:    string(msg.Body),
+				Timestamp:  time.Now(),
+				UID:        payload["user_id"],
+				ShowtimeID: payload["showtime_id"],
+				SeatNumber: payload["seat_number"],
 			}
 
 			collection := config.GetCollection("audit_logs")

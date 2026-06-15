@@ -6,6 +6,7 @@ import { onAuthStateChanged, signOut, type User } from 'firebase/auth'
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const isLoading = ref(true)
+  const isAdmin = ref(false)
 
   // Wait for the first auth state check to complete
   let resolveInit: (value: unknown) => void
@@ -14,8 +15,21 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   // Listen to Firebase Auth state changes
-  onAuthStateChanged(auth, (currentUser) => {
+  onAuthStateChanged(auth, async (currentUser) => {
+    if (currentUser) {
+      try {
+        const idTokenResult = await currentUser.getIdTokenResult(true)
+        isAdmin.value = !!idTokenResult.claims.admin || idTokenResult.claims.role === 'admin'
+      } catch (err) {
+        console.error("Failed to fetch custom claims", err)
+        isAdmin.value = false
+      }
+    } else {
+      isAdmin.value = false
+    }
+
     user.value = currentUser
+
     if (isLoading.value) {
       isLoading.value = false
       resolveInit(true)
@@ -36,6 +50,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     user,
     isLoading,
+    isAdmin,
     waitForInit,
     logout
   }
