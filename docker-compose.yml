@@ -1,18 +1,74 @@
-version: '3.8'
-
 services:
+  # ==========================================
+  # Infrastructure Services
+  # ==========================================
   mongo_db:
     image: mongo:latest
     ports:
       - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
 
   redis_cache:
     image: redis:alpine
     ports:
       - "6379:6379"
+    command: redis-server --notify-keyspace-events Ex
 
   rabbitmq_queue:
     image: rabbitmq:3-management-alpine
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # Backend API (Go / Gin)
+  # ==========================================
+  backend_api:
+    build:
+      context: ./golden-stage-cinema-server
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MONGO_URI=mongodb://mongo_db:27017
+      - MONGO_DB_NAME=golden_stage_db
+      - REDIS_ADDR=redis_cache:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq_queue:5672/
+      - CORS_ORIGIN=http://localhost:5173
+    depends_on:
+      mongo_db:
+        condition: service_started
+      redis_cache:
+        condition: service_started
+      rabbitmq_queue:
+        condition: service_healthy
+
+  # ==========================================
+  # Frontend App (Vue 3 + Nginx)
+  # ==========================================
+  frontend_app:
+    build:
+      context: ./golden-stage-cinema-client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8080/api
+        VITE_FIREBASE_API_KEY: AIzaSyC5mCF2qRDx4MYPjTBuoSxkCPpnmRP5_cU
+        VITE_FIREBASE_AUTH_DOMAIN: golden-stage-cinema.firebaseapp.com
+        VITE_FIREBASE_PROJECT_ID: golden-stage-cinema
+        VITE_FIREBASE_STORAGE_BUCKET: golden-stage-cinema.firebasestorage.app
+        VITE_FIREBASE_MESSAGING_SENDER_ID: "563757185221"
+        VITE_FIREBASE_APP_ID: "1:563757185221:web:8137dc5f396a450cfb18ac"
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend_api
+
+volumes:
+  mongo_data:

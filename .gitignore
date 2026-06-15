@@ -4,8 +4,19 @@
 # Go
 /golden-stage-cinema-server/tmp/
 /golden-stage-cinema-server/bin/
+*.exe
 
 # Node / Vue
 node_modules/
 dist/
 .DS_Store
+
+# Code Walkthrough
+golden-stage-cinema-server/code_walkthrough.md
+
+# Firebase Service Account
+firebase-service-account.json
+
+# doc
+realtime_troubleshooting.md
+code_walkthrough.md
