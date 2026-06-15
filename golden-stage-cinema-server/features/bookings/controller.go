@@ -145,6 +145,16 @@ func LockSeat(c *gin.Context) {
 
 		c.JSON(http.StatusOK, gin.H{"message": "Seat locked successfully"})
 	} else {
+		// Log System Error (Lock fail)
+		auditCollection := config.GetCollection("audit_logs")
+		auditCollection.InsertOne(ctx, AuditLog{
+			Action:     "SYSTEM_ERROR",
+			Details:    fmt.Sprintf("Lock failed: Seat %s for showtime %s is already locked or unavailable", req.SeatNumber, req.ShowtimeID),
+			Timestamp:  time.Now(),
+			UID:        userID,
+			ShowtimeID: req.ShowtimeID,
+			SeatNumber: req.SeatNumber,
+		})
 		c.JSON(http.StatusConflict, gin.H{"error": "Seat is already locked by another user"})
 	}
 }
@@ -195,6 +205,17 @@ func UnlockSeat(c *gin.Context) {
 	config.RabbitChannel.PublishWithContext(ctx, "seat_updates_ex", "", false, false, amqp.Publishing{
 		ContentType: "application/json",
 		Body:        messageBody,
+	})
+
+	// Log Seat Released
+	auditCollection := config.GetCollection("audit_logs")
+	auditCollection.InsertOne(ctx, AuditLog{
+		Action:     "SEAT_RELEASED",
+		Details:    fmt.Sprintf("User %s explicitly released seat %s for showtime %s", userIDClean, seatNumber, showtimeID),
+		Timestamp:  time.Now(),
+		UID:        userIDClean,
+		ShowtimeID: showtimeID,
+		SeatNumber: seatNumber,
 	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "Seat unlocked successfully"})
