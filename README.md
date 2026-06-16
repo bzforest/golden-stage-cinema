@@ -1,5 +1,11 @@
 # 🎬 Cinema Ticket Booking System
 
+## 🚀 Live Demo
+
+โปรเจกต์นี้ได้รับการ Deploy เพื่อใช้งานจริงบน Google Cloud Platform สามารถเข้าชมหน้าเว็บไซต์ได้ที่ลิงก์ด้านล่าง:
+
+**[Golden Stage Cinema - Live Website](http://35.254.168.11:5173)**
+
 ## 1. System Architecture Diagram
 
 ```text
