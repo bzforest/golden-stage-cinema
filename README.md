@@ -240,3 +240,14 @@ docker compose up --build -d
 ### 2. Logic การทำงาน
 - **Group Bookings:** ทำการรวบรวม (Group) ตั๋วหนังหลายใบที่จองในรอบฉายเดียวกัน ให้อยู่ในรูปแบบ Card ใบเดียวที่มี `Seats: [A1, A2]` เพื่อลดความซ้ำซ้อนของการแสดงผล
 - **Time Comparison:** ใช้ Computed Properties ของ Vue ในการเปรียบเทียบเวลา (Time Comparison) กับเวลาปัจจุบัน เพื่อคัดแยกตั๋วที่ยังไม่ฉาย (Upcoming) และตั๋วที่ฉายจบแล้ว (Past History) แยกไปตามแต่ละแท็บอย่างแม่นยำ
+
+## 12. การตั้งค่า Environment และ Firebase Secret
+
+เนื่องจากเหตุผลด้านความปลอดภัยไฟล์ `firebase-service-account.json` ซึ่งเป็น Private Key สำหรับเข้าถึง Backend จึงไม่ได้ถูกอัปโหลดขึ้นบน Repository นี้ครับ
+
+สำหรับการทดสอบรันโปรเจกต์บนเครื่อง Local ผ่าน Docker สามารถดำเนินการได้ตามขั้นตอนต่อไปนี้:
+
+1. เข้าไปที่โฟลเดอร์ `golden-stage-cinema-server`
+2. สร้างไฟล์ใหม่และตั้งชื่อว่า `firebase-service-account.json`
+3. สำหรับไส้ในของไฟล์ คณะกรรมการสามารถใช้ Firebase Credentials ของท่านเองโดยอ้างอิงโครงสร้างจากไฟล์ `firebase-service-account.example.json` **หรือ** สามารถติดต่อผมเพื่อขอรับไฟล์ Key สำหรับการทดสอบระบบได้โดยตรงครับ
+4. เมื่อเตรียมไฟล์เสร็จสิ้น สามารถสั่งรันระบบด้วยคำสั่ง `docker compose up --build -d` ได้ตามปกติครับ
